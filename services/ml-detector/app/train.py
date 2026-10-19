@@ -51,7 +51,8 @@ def main():
 
     X = np.array(rows)
     mean, std = X.mean(axis=0), X.std(axis=0)
-    clf = IsolationForest(n_estimators=100, contamination=0.1, random_state=42).fit(X)
+    std_safe = np.where(std < 1e-6, 1.0, std)
+    clf = IsolationForest(n_estimators=100, contamination=0.1, random_state=42).fit((X - mean) / std_safe)
     baseline = {f: round(float(m), 4) for f, m in zip(FEATURES, mean)}
 
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)

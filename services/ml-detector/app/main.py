@@ -42,8 +42,8 @@ WARMUP_SAMPLES = int(os.getenv("WARMUP_SAMPLES", "20"))
 TARGET_CONTAINER = os.getenv("TARGET_CONTAINER", "rsa-payment-api")
 COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "90"))  # pas de ré-action juste après une reprise
 MODEL_PATH = os.getenv("MODEL_PATH", "/model/model.pkl")
-ERR_DEGRADE = float(os.getenv("ERROR_DEGRADE", "0.1"))            # taux de 5xx -> dégradation
-LAT_DEGRADE = float(os.getenv("LATENCY_DEGRADE_SECONDS", "0.5"))  # latence p95 -> dégradation
+ERR_DEGRADE = float(os.getenv("ERROR_DEGRADE", "0.05"))           # taux de 5xx -> dégradation
+LAT_DEGRADE = float(os.getenv("LATENCY_DEGRADE_SECONDS", "0.3"))  # latence p95 -> dégradation
 
 FEATURES = ["request_rate", "error_ratio", "p95_latency"]
 QUERIES = {
@@ -66,6 +66,13 @@ state = {"status": "warmup", "samples": 0, "score": None, "flag": 0,
          "poll_interval": POLL, "baseline": None, "score_history": [],
          "degraded": False, "raw_flag": 0}
 model = {"clf": None, "mean": None, "std": None}
+
+
+def _scale(x):
+    """Standardise (z-score) avec la moyenne/écart-type appris. Évite qu'une feature à
+    grande échelle (le débit) écrase les autres -> Isolation Forest bien plus sensible."""
+    std = np.where(model["std"] < 1e-6, 1.0, model["std"])
+    return (x - model["mean"]) / std
 _last_action_ts = 0.0
 
 
@@ -157,7 +164,7 @@ def detection_loop():
             time.sleep(POLL)
         X = np.array(train)
         model["mean"], model["std"] = X.mean(axis=0), X.std(axis=0)
-        model["clf"] = IsolationForest(n_estimators=100, contamination=0.1, random_state=42).fit(X)
+        model["clf"] = IsolationForest(n_estimators=100, contamination=0.1, random_state=42).fit(_scale(X))
         state["baseline"] = {f: round(float(m), 4) for f, m in zip(FEATURES, model["mean"])}
         state["status"] = "monitoring"
         _save_model()
@@ -167,7 +174,7 @@ def detection_loop():
     clf = model["clf"]
     while True:
         vec = collect_vector()
-        x = np.array([[vec[f] for f in FEATURES]])
+        x = _scale(np.array([[vec[f] for f in FEATURES]]))
         score = float(clf.decision_function(x)[0])   # <0 => anormal
         is_anom = int(clf.predict(x)[0] == -1)
         # Une anomalie statistique n'est un INCIDENT que si le service est réellement dégradé
