@@ -30,6 +30,7 @@ volumes:
   grafana-data:
   loki-data:
   ollama-data:
+  ml-model:
 
 services:
   # ---------------------------------------------------------------
@@ -197,6 +198,9 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       POLL_INTERVAL_SECONDS: "10"
       ANOMALY_PERSIST_CYCLES: "2"      # anti faux-positif : N cycles consécutifs avant d'agir
+      MODEL_PATH: /model/model.pkl
+    volumes:
+      - ml-model:/model               # le modèle entraîné survit aux redémarrages
     depends_on: [prometheus]
     networks: [rsa-net]
     <<: *json-logging

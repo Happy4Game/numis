@@ -41,6 +41,7 @@ PERSIST = int(os.getenv("ANOMALY_PERSIST_CYCLES", "2"))
 WARMUP_SAMPLES = int(os.getenv("WARMUP_SAMPLES", "20"))
 TARGET_CONTAINER = os.getenv("TARGET_CONTAINER", "rsa-payment-api")
 COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "90"))  # pas de ré-action juste après une reprise
+MODEL_PATH = os.getenv("MODEL_PATH", "/model/model.pkl")
 
 FEATURES = ["request_rate", "error_ratio", "p95_latency"]
 QUERIES = {
@@ -114,25 +115,53 @@ def trigger_remediation(reason: str):
         log.error("échec appel remédiation", extra={"extra_fields": {"err": str(e)}})
 
 
-def detection_loop():
-    train = []
-    # --- Phase 1 : warmup (apprentissage de la normalité) ---
-    while len(train) < WARMUP_SAMPLES:
-        vec = collect_vector()
-        train.append([vec[f] for f in FEATURES])
-        state.update(samples=len(train), features=vec)
-        time.sleep(POLL)
-    X = np.array(train)
-    model["mean"], model["std"] = X.mean(axis=0), X.std(axis=0)
-    clf = IsolationForest(n_estimators=100, contamination=0.1, random_state=42)
-    clf.fit(X)
-    model["clf"] = clf
-    state["baseline"] = {f: round(float(m), 4) for f, m in zip(FEATURES, model["mean"])}
-    state["status"] = "monitoring"
-    log.info("warmup terminé, passage en surveillance",
-             extra={"extra_fields": {"mean": model["mean"].tolist()}})
+def _save_model():
+    import pickle
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+    with open(MODEL_PATH, "wb") as fh:
+        pickle.dump({"clf": model["clf"], "mean": model["mean"],
+                     "std": model["std"], "baseline": state["baseline"]}, fh)
+    log.info("modèle sauvegardé", extra={"extra_fields": {"path": MODEL_PATH}})
 
-    # --- Phase 2 : surveillance ---
+
+def _load_model():
+    import pickle
+    with open(MODEL_PATH, "rb") as fh:
+        d = pickle.load(fh)
+    model["clf"] = d["clf"]
+    model["mean"] = np.array(d["mean"]); model["std"] = np.array(d["std"])
+    state["baseline"] = d["baseline"]
+
+
+def detection_loop():
+    # Si un modèle a déjà été entraîné (persisté sur disque), on le recharge : plus besoin
+    # de réapprendre à chaque redémarrage (répond à "je ne veux pas juste lancer et attendre").
+    if os.path.exists(MODEL_PATH):
+        try:
+            _load_model()
+            state["status"] = "monitoring"
+            log.info("modèle chargé depuis le disque, apprentissage ignoré")
+        except Exception as e:
+            log.warning(f"échec du chargement du modèle ({e}), on réapprend")
+
+    # Sinon : apprentissage de la normalité sur le trafic courant.
+    if model["clf"] is None:
+        train = []
+        while len(train) < WARMUP_SAMPLES:
+            vec = collect_vector()
+            train.append([vec[f] for f in FEATURES])
+            state.update(samples=len(train), features=vec)
+            time.sleep(POLL)
+        X = np.array(train)
+        model["mean"], model["std"] = X.mean(axis=0), X.std(axis=0)
+        model["clf"] = IsolationForest(n_estimators=100, contamination=0.1, random_state=42).fit(X)
+        state["baseline"] = {f: round(float(m), 4) for f, m in zip(FEATURES, model["mean"])}
+        state["status"] = "monitoring"
+        _save_model()
+        log.info("apprentissage terminé, passage en surveillance")
+
+    # --- Surveillance continue ---
+    clf = model["clf"]
     while True:
         vec = collect_vector()
         x = np.array([[vec[f] for f in FEATURES]])
