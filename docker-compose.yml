@@ -79,6 +79,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       DB_DSN: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
       AUTH_URL: http://auth:8000
+      REMEDIATION_TOKEN: ${REMEDIATION_TOKEN}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       db: {condition: service_healthy}
@@ -213,6 +214,7 @@ services:
       # Allowlist STRICTE : seuls ces conteneurs peuvent être actionnés (sujet §3.4 "privilèges maîtrisés")
       MANAGED_CONTAINERS: "rsa-payment-api"
       PAYMENT_HEALTH_URL: http://payment-api:8000/health
+      PAYMENT_ADMIN_URL: http://payment-api:8000
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       # Accès Docker nécessaire pour restart/isolation. Durci via allowlist applicative.

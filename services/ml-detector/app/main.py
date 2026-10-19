@@ -42,6 +42,8 @@ WARMUP_SAMPLES = int(os.getenv("WARMUP_SAMPLES", "20"))
 TARGET_CONTAINER = os.getenv("TARGET_CONTAINER", "rsa-payment-api")
 COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "90"))  # pas de ré-action juste après une reprise
 MODEL_PATH = os.getenv("MODEL_PATH", "/model/model.pkl")
+ERR_DEGRADE = float(os.getenv("ERROR_DEGRADE", "0.1"))            # taux de 5xx -> dégradation
+LAT_DEGRADE = float(os.getenv("LATENCY_DEGRADE_SECONDS", "0.5"))  # latence p95 -> dégradation
 
 FEATURES = ["request_rate", "error_ratio", "p95_latency"]
 QUERIES = {
@@ -61,7 +63,8 @@ app = FastAPI(title="RSA ML Detector")
 state = {"status": "warmup", "samples": 0, "score": None, "flag": 0,
          "features": {}, "explanation": "", "last_action": None, "consecutive": 0,
          "warmup_target": WARMUP_SAMPLES, "persist_target": PERSIST,
-         "poll_interval": POLL, "baseline": None, "score_history": []}
+         "poll_interval": POLL, "baseline": None, "score_history": [],
+         "degraded": False, "raw_flag": 0}
 model = {"clf": None, "mean": None, "std": None}
 _last_action_ts = 0.0
 
@@ -104,7 +107,7 @@ def trigger_remediation(reason: str):
         r = httpx.post(
             f"{REMEDIATION_URL}/remediate",
             headers={"x-remediation-token": REMEDIATION_TOKEN},
-            json={"target": TARGET_CONTAINER, "action": "restart", "reason": reason, "source": SERVICE},
+            json={"target": TARGET_CONTAINER, "action": "auto", "reason": reason, "source": SERVICE},
             timeout=75.0,
         )
         _last_action_ts = time.time()
@@ -167,15 +170,20 @@ def detection_loop():
         x = np.array([[vec[f] for f in FEATURES]])
         score = float(clf.decision_function(x)[0])   # <0 => anormal
         is_anom = int(clf.predict(x)[0] == -1)
-        G_SCORE.set(score); G_FLAG.set(is_anom)
+        # Une anomalie statistique n'est un INCIDENT que si le service est réellement dégradé
+        # (erreurs ou latence). Un simple creux de trafic ne déclenche donc rien.
+        degraded = (vec["error_ratio"] > ERR_DEGRADE) or (vec["p95_latency"] > LAT_DEGRADE)
+        effective = is_anom and degraded
+        G_SCORE.set(score); G_FLAG.set(effective)
         hist = state["score_history"]; hist.append(round(score, 4))
         del hist[:-40]  # ne garde que les 40 derniers points
-        state.update(features=vec, score=round(score, 4), flag=is_anom)
+        state.update(features=vec, score=round(score, 4), flag=effective,
+                     raw_flag=is_anom, degraded=degraded)
 
-        if is_anom:
+        if effective:
             state["consecutive"] += 1
             state["explanation"] = explain(vec)
-            log.info("cycle anormal", extra={"extra_fields": {
+            log.info("incident (anomalie + dégradation)", extra={"extra_fields": {
                 "consecutive": state["consecutive"], "score": score, "why": state["explanation"]}})
             if state["consecutive"] >= PERSIST:
                 trigger_remediation(state["explanation"])

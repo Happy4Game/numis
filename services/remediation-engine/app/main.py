@@ -41,7 +41,9 @@ log = logging.getLogger(SERVICE)
 TOKEN = os.environ["REMEDIATION_TOKEN"]
 MANAGED = set(c.strip() for c in os.getenv("MANAGED_CONTAINERS", "").split(",") if c.strip())
 HEALTH_URL = os.getenv("PAYMENT_HEALTH_URL", "http://payment-api:8000/health")
-ALLOWED_ACTIONS = {"restart"}
+PAYMENT_ADMIN_URL = os.getenv("PAYMENT_ADMIN_URL", "http://payment-api:8000")
+THROTTLE_RPS = int(os.getenv("THROTTLE_RPS", "20"))
+ALLOWED_ACTIONS = {"restart", "throttle", "auto"}
 
 ACTIONS_TOTAL = Counter("remediation_actions_total", "Actions de remédiation", ["action", "target", "result"])
 LAST_RECOVERY = Gauge("remediation_last_recovery_seconds", "Durée de la dernière reprise vérifiée (s)")
@@ -55,7 +57,7 @@ app = FastAPI(title="RSA Remediation Engine")
 
 class RemediationRequest(BaseModel):
     target: str          # nom du conteneur
-    action: str          # "restart"
+    action: str = "auto"  # "auto" (playbook décide) | "restart" | "throttle"
     reason: str = ""     # explication (ex. feature ML en cause)
     source: str = "ml-detector"
 
@@ -82,6 +84,37 @@ def _verify_recovery(timeout_s: int = 60) -> float:
     raise HTTPException(504, "reprise non confirmée dans le délai imparti")
 
 
+def _service_up() -> bool:
+    try:
+        with httpx.Client(timeout=3.0) as c:
+            return c.get(HEALTH_URL).status_code == 200
+    except Exception:
+        return False
+
+
+def _decide() -> str:
+    """Playbook : service injoignable => conteneur planté => restart.
+    Service vivant mais dégradé (flood) => délestage de charge."""
+    return "throttle" if _service_up() else "restart"
+
+
+def _do_restart(target: str) -> float:
+    if target not in MANAGED:
+        REFUSED_TOTAL.labels("target_not_allowed").inc()
+        log.warning("cible hors allowlist refusée", extra={"extra_fields": {"target": target}})
+        raise HTTPException(403, f"cible non pilotable: {target}")
+    client.containers.get(target).restart(timeout=10)
+    return _verify_recovery()
+
+
+def _do_throttle() -> float:
+    with httpx.Client(timeout=5.0) as c:
+        c.post(f"{PAYMENT_ADMIN_URL}/admin/protect",
+               headers={"x-remediation-token": TOKEN},
+               json={"enabled": True, "rps": THROTTLE_RPS})
+    return _verify_recovery()
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "managed": sorted(MANAGED)}
@@ -102,36 +135,34 @@ def actions():
 def remediate(req: RemediationRequest, x_remediation_token: str = Header(default="")):
     _authz(x_remediation_token)
 
-    # Garde-fou 1 : action autorisée ?
-    if req.action not in ALLOWED_ACTIONS:
-        REFUSED_TOTAL.labels("action_not_allowed").inc()
-        raise HTTPException(403, f"action non autorisée: {req.action}")
-    # Garde-fou 2 : cible dans l'allowlist ?
-    if req.target not in MANAGED:
-        REFUSED_TOTAL.labels("target_not_allowed").inc()
-        log.warning("cible hors allowlist refusée", extra={"extra_fields": {"target": req.target}})
-        raise HTTPException(403, f"cible non pilotable: {req.target}")
+    action = req.action if req.action in ALLOWED_ACTIONS else "auto"
+    if action == "auto":
+        action = _decide()
 
     entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-             "target": req.target, "action": req.action, "reason": req.reason,
+             "target": req.target, "action": action, "reason": req.reason,
              "source": req.source, "result": "pending"}
     log.info("remédiation engagée", extra={"extra_fields": entry})
 
     try:
-        container = client.containers.get(req.target)
-        container.restart(timeout=10)
-        recovery_s = _verify_recovery()
+        if action == "restart":
+            recovery_s = _do_restart(req.target)
+        elif action == "throttle":
+            recovery_s = _do_throttle()
+        else:
+            REFUSED_TOTAL.labels("action_not_allowed").inc()
+            raise HTTPException(403, f"action non autorisée: {action}")
         LAST_RECOVERY.set(recovery_s)
-        ACTIONS_TOTAL.labels(req.action, req.target, "success").inc()
+        ACTIONS_TOTAL.labels(action, req.target, "success").inc()
         entry.update(result="success", recovery_seconds=round(recovery_s, 1))
         log.info("reprise vérifiée", extra={"extra_fields": entry})
     except HTTPException:
-        ACTIONS_TOTAL.labels(req.action, req.target, "unverified").inc()
+        ACTIONS_TOTAL.labels(action, req.target, "unverified").inc()
         entry.update(result="unverified")
         history.appendleft(entry)
         raise
     except docker.errors.NotFound:
-        ACTIONS_TOTAL.labels(req.action, req.target, "not_found").inc()
+        ACTIONS_TOTAL.labels(action, req.target, "not_found").inc()
         entry.update(result="not_found")
         history.appendleft(entry)
         raise HTTPException(404, f"conteneur introuvable: {req.target}")

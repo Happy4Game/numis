@@ -3,7 +3,8 @@
 1. **Attaque** (PC Attaquant) : `python attack/scenarios/dos_flood.py --target http://192.168.137.1:8080`.
 2. **Symptômes** : latence p95 ↑, 5xx ↑ (Grafana / dashboard).
 3. **Détection** : `ml-detector` flagge l'anomalie (N cycles) ; cause affichée (feature déviante).
-4. **Reprise auto** : `remediation-engine` restart `rsa-payment-api` + vérifie `/health`.
+4. **Reprise auto** : `remediation-engine` applique le playbook — ici **délestage** (l'API rejette
+   l'excédent en 429, le pool se libère) + vérifie `/health`. (Un conteneur planté donnerait un `restart`.)
 5. **Preuve** : dashboard repasse au vert ; "Transaction témoin" ou `make smoke` réussit.
 6. **Investigation** : logs dans Grafana (Loki), historique dans l'onglet remédiation.
 

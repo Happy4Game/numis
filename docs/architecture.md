@@ -40,10 +40,13 @@ payment-api ──/metrics──► Prometheus ──query──► ml-detector 
 2. `prometheus` scrape toutes les 10 s.
 3. `ml-detector` interroge Prometheus, construit un vecteur de 3 features, le score avec un
    **Isolation Forest** appris sur une fenêtre de normalité.
-4. Après **N cycles anormaux consécutifs** (anti faux-positif), il appelle `remediation-engine`
-   avec une explication (la feature qui a dérivé).
-5. `remediation-engine` redémarre le **seul** conteneur autorisé puis **attend le retour à
-   `/health`** : un conteneur relancé ne suffit pas, on prouve le retour à un état utilisable.
+4. Une anomalie n'est traitée comme **incident** que si elle s'accompagne d'une **dégradation**
+   réelle (erreurs ou latence au-dessus d'un seuil) : un simple creux de trafic ne déclenche rien.
+   Après **N cycles d'incident consécutifs** (anti faux-positif), il appelle `remediation-engine`.
+5. `remediation-engine` applique un **playbook** : service injoignable (planté) → `restart` du
+   conteneur autorisé ; service vivant mais saturé (DoS) → **délestage de charge** (il active un
+   rate-limiting sur l'API, qui rejette l'excédent en 429 et libère le pool). Puis il **vérifie le
+   retour à `/health`** : un conteneur relancé ne suffit pas, on prouve le retour à un état utilisable.
 6. Le `frontend` et Grafana rendent l'état visible **avant / pendant / après**.
 
 ### 2.3 Chaîne d'observabilité / SOC
@@ -60,7 +63,8 @@ La remédiation a besoin de droits élevés (piloter Docker). On les **encadre**
 
 1. **Isolation** : seul `remediation-engine` monte `/var/run/docker.sock`.
 2. **Allowlist de cibles** : variable `MANAGED_CONTAINERS` ; toute autre cible est refusée (403).
-3. **Allowlist d'actions** : uniquement `restart` (+ vérification interne). Pas d'exec arbitraire.
+3. **Allowlist d'actions** : `restart` (conteneur de l'allowlist) ou `throttle` (délestage via
+   l'API, jeton partagé). Pas d'exec arbitraire.
 4. **Authentification** : header `x-remediation-token` obligatoire (détenu par `ml-detector`).
 5. **Traçabilité** : chaque demande (acceptée ou refusée) est journalisée et comptée (métriques
    `remediation_actions_total`, `remediation_refused_total`).
@@ -101,7 +105,7 @@ qu'au frontend).
 ## 7. Limites assumées (à dire au jury)
 
 - Détection sur 3 features : couvre la dégradation de disponibilité, pas toutes les attaques.
-- Remédiation = restart + rate-limit : traite la **disponibilité**, pas la correction d'une
-  compromission (scénario SQLi → on bloque en amont, on n'auto-remédie pas une fuite).
+- Remédiation = restart (crash) ou délestage (DoS) : traite la **disponibilité**, pas la
+  correction d'une compromission (scénario SQLi → bloqué en amont par le WAF, pas d'auto-remédiation).
 - Fenêtre de normalité courte (warmup) : un trafic de référence atypique fausserait le modèle.
 - Prototype 4 jours : pas de HA, pas de persistance longue des métriques.
