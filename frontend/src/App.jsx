@@ -1,150 +1,395 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 
-const GRAFANA = import.meta.env.VITE_GRAFANA_URL || 'http://localhost:3000'
+/* ---------- accès API (via le reverse-proxy du frontend) ---------- */
+async function api(path, opts) {
+  const r = await fetch(path, opts)
+  if (!r.ok) throw new Error(`${path} → ${r.status}`)
+  return r.status === 204 ? null : r.json()
+}
+const authHeader = (t) => ({ Authorization: `Bearer ${t}` })
 
-async function j(url, opts) {
-  const r = await fetch(url, opts)
-  if (!r.ok) throw new Error(`${url} -> ${r.status}`)
-  return r.json()
+/* ---------- formatage ---------- */
+const euro = (n) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n)
+const signalFmt = {
+  request_rate: { label: 'Débit', unit: 'req/s', f: (v) => v.toFixed(1) },
+  error_ratio:  { label: "Taux d'erreur", unit: '', f: (v) => (v * 100).toFixed(1) + ' %' },
+  p95_latency:  { label: 'Latence p95', unit: '', f: (v) => (v * 1000).toFixed(0) + ' ms' },
 }
 
-function Dot({ ok }) {
-  return <span className={`inline-block w-3 h-3 rounded-full ${ok ? 'bg-emerald-400' : 'bg-rose-500'}`} />
-}
-
-function Card({ title, children, accent }) {
+/* ---------- briques UI ---------- */
+function Panel({ title, hint, children, tone }) {
+  const ring = tone === 'alert' ? 'ring-1 ring-alert/60' : tone === 'warn' ? 'ring-1 ring-warn/50' : ''
   return (
-    <div className={`rounded-xl border border-slate-700/60 bg-slate-800/40 p-4 ${accent || ''}`}>
-      <h2 className="text-xs uppercase tracking-widest text-slate-400 mb-3">{title}</h2>
-      {children}
-    </div>
+    <section className={`rounded-2xl bg-panel border border-line ${ring}`}>
+      <header className="px-5 pt-4 pb-3 border-b border-line/70">
+        <h2 className="text-[15px] font-semibold text-text">{title}</h2>
+        {hint && <p className="text-[13px] text-muted mt-0.5 leading-snug">{hint}</p>}
+      </header>
+      <div className="p-5">{children}</div>
+    </section>
+  )
+}
+function Dot({ ok }) {
+  return <span className={`inline-block w-2.5 h-2.5 rounded-full ${ok ? 'bg-money' : 'bg-alert'}`} />
+}
+function Pill({ children, color }) {
+  const c = { money: 'bg-money/15 text-money', warn: 'bg-warn/15 text-warn',
+              alert: 'bg-alert/15 text-alert', accent: 'bg-accent/15 text-accent',
+              muted: 'bg-line text-muted' }[color] || 'bg-line text-muted'
+  return <span className={`px-2 py-0.5 rounded-full text-[12px] font-medium ${c}`}>{children}</span>
+}
+
+/* ---------- courbe du score ---------- */
+function Sparkline({ data }) {
+  if (!data || data.length < 2) return <div className="h-12 flex items-center text-[12px] text-muted">pas encore de points…</div>
+  const min = Math.min(...data, 0), max = Math.max(...data, 0)
+  const span = max - min || 1
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${30 - ((v - min) / span) * 30}`).join(' ')
+  const zeroY = 30 - ((0 - min) / span) * 30
+  const anom = data[data.length - 1] < 0
+  return (
+    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-12">
+      <line x1="0" y1={zeroY} x2="100" y2={zeroY} stroke="#27324F" strokeWidth="0.5" strokeDasharray="2 2" />
+      <polyline points={pts} fill="none" stroke={anom ? '#F26D6D' : '#35D6A4'} strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
+    </svg>
   )
 }
 
+/* ---------- panneau PAIEMENT ---------- */
+function Payment({ token, accounts, txs, onTransfer, offline, busy }) {
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [amount, setAmount] = useState('25')
+
+  useEffect(() => {
+    if (accounts.length >= 2 && !from) { setFrom(String(accounts[0].id)); setTo(String(accounts[1].id)) }
+  }, [accounts])
+
+  if (offline) {
+    return (
+      <Panel title="Numis — paiements" hint="Virements entre comptes de démonstration.">
+        <div className="text-[13px] text-muted">
+          Service de paiement injoignable. Vérifiez que la plateforme est démarrée
+          (<span className="font-mono text-text">make up</span>), puis rechargez la page.
+        </div>
+      </Panel>
+    )
+  }
+
+  const submit = (e) => {
+    e.preventDefault()
+    if (from === to) return
+    onTransfer({ from_account: +from, to_account: +to, amount: +amount })
+  }
+
+  return (
+    <Panel title="Numis — paiements" hint="Virements entre vos comptes de démonstration.">
+      {/* comptes */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        {accounts.map((a) => (
+          <div key={a.id} className="rounded-xl bg-raised border border-line px-4 py-3">
+            <div className="text-[12px] text-muted">{a.label}</div>
+            <div className="text-[22px] font-semibold font-mono tnum text-money mt-1">{euro(a.balance)}</div>
+          </div>
+        ))}
+        {accounts.length === 0 && <div className="col-span-2 text-[13px] text-muted">Chargement des comptes…</div>}
+      </div>
+
+      {/* formulaire de virement */}
+      <form onSubmit={submit} className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-[12px] text-muted">Depuis</span>
+            <select value={from} onChange={(e) => setFrom(e.target.value)}
+              className="mt-1 w-full rounded-lg bg-ink border border-line px-3 py-2 text-[14px] focus:border-accent outline-none">
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[12px] text-muted">Vers</span>
+            <select value={to} onChange={(e) => setTo(e.target.value)}
+              className="mt-1 w-full rounded-lg bg-ink border border-line px-3 py-2 text-[14px] focus:border-accent outline-none">
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+            </select>
+          </label>
+        </div>
+        <label className="block">
+          <span className="text-[12px] text-muted">Montant</span>
+          <input type="number" min="1" step="1" value={amount} onChange={(e) => setAmount(e.target.value)}
+            className="mt-1 w-full rounded-lg bg-ink border border-line px-3 py-2 text-[14px] font-mono tnum focus:border-accent outline-none" />
+        </label>
+        {from === to && <p className="text-[12px] text-warn">Choisissez deux comptes différents.</p>}
+        <button type="submit" disabled={busy || from === to}
+          className="w-full rounded-lg bg-accent hover:bg-accent/90 disabled:opacity-50 text-ink font-semibold px-3 py-2.5 text-[14px] transition">
+          {busy ? 'Envoi…' : 'Envoyer le paiement'}
+        </button>
+      </form>
+
+      {/* journal */}
+      <div className="mt-5">
+        <div className="text-[12px] text-muted mb-2">Derniers mouvements</div>
+        {txs.length === 0 ? (
+          <p className="text-[13px] text-muted">Aucun mouvement pour l'instant. Envoyez un premier paiement.</p>
+        ) : (
+          <ul className="divide-y divide-line/60">
+            {txs.slice(0, 6).map((t) => (
+              <li key={t.id} className="flex items-center justify-between py-2 text-[13px]">
+                <span className="text-muted font-mono tnum">#{t.id} · {t.from}→{t.to}</span>
+                <span className="flex items-center gap-2">
+                  <span className="font-mono tnum">{euro(t.amount)}</span>
+                  <Pill color={t.status === 'completed' ? 'money' : 'alert'}>{t.status === 'completed' ? 'réglé' : 'échoué'}</Pill>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
+/* ---------- panneau IA ---------- */
+function Ai({ ml }) {
+  if (!ml) return <Panel title="Détecteur d'anomalies (IA)" hint="En attente du service…"><div className="text-[13px] text-muted">Connexion au détecteur…</div></Panel>
+
+  const phase = ml.status
+  const warming = phase === 'warmup'
+  const anomaly = ml.flag === 1
+  const pct = ml.warmup_target ? Math.min(100, Math.round((ml.samples / ml.warmup_target) * 100)) : 0
+
+  const tone = anomaly ? 'alert' : warming ? 'warn' : undefined
+  const phasePill = warming ? <Pill color="warn">Apprentissage</Pill>
+    : phase === 'monitoring' ? <Pill color={anomaly ? 'alert' : 'money'}>{anomaly ? 'Anomalie détectée' : 'Surveillance active'}</Pill>
+    : <Pill color="muted">{phase}</Pill>
+
+  return (
+    <Panel
+      title={<span className="flex items-center gap-2">Détecteur d'anomalies (IA) {phasePill}</span>}
+      hint="Isolation Forest sur le trafic de l'API de paiement."
+      tone={tone}
+    >
+      {warming ? (
+        <div>
+          <p className="text-[13px] text-muted leading-relaxed mb-3">
+            Le détecteur observe le trafic <span className="text-text">normal</span> pour apprendre à quoi
+            ressemble une situation saine. Il pourra repérer une anomalie une fois cette référence établie.
+          </p>
+          <div className="flex items-center justify-between text-[12px] text-muted mb-1">
+            <span>Apprentissage de la normalité</span>
+            <span className="font-mono tnum">{ml.samples}/{ml.warmup_target} observations</span>
+          </div>
+          <div className="h-2 rounded-full bg-ink overflow-hidden">
+            <div className="h-full bg-accent transition-all" style={{ width: pct + '%' }} />
+          </div>
+          <p className="text-[12px] text-muted mt-2">
+            ~{Math.max(0, (ml.warmup_target - ml.samples) * (ml.poll_interval || 10))} s restantes au rythme actuel.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* score */}
+          <div>
+            <div className="flex items-center justify-between text-[12px] text-muted mb-1">
+              <span>Score d'anomalie <span className="text-muted/70">(sous 0 = anormal)</span></span>
+              <span className="font-mono tnum text-text">{ml.score ?? '—'}</span>
+            </div>
+            <Sparkline data={ml.score_history} />
+          </div>
+
+          {/* signaux : normal vs maintenant */}
+          <div className="space-y-2">
+            {Object.keys(signalFmt).map((k) => {
+              const cur = ml.features?.[k] ?? 0
+              const base = ml.baseline?.[k]
+              const ratio = base && base > 1e-6 ? cur / base : null
+              const hot = ratio !== null && ratio >= 1.5
+              const f = signalFmt[k]
+              return (
+                <div key={k} className="flex items-center justify-between rounded-lg bg-raised border border-line px-3 py-2">
+                  <span className="text-[13px] text-muted">{f.label}</span>
+                  <span className="flex items-center gap-3">
+                    <span className="text-[12px] text-muted/80">normal <span className="font-mono tnum">{base != null ? f.f(base) : '—'}</span></span>
+                    <span className="font-mono tnum text-[14px] text-text">{f.f(cur)}</span>
+                    {hot && <Pill color="alert">×{ratio.toFixed(1)}</Pill>}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* verdict */}
+          {anomaly ? (
+            <div className="rounded-lg bg-alert/10 border border-alert/40 px-3 py-2.5">
+              <div className="text-[13px] text-alert font-medium">Comportement suspect</div>
+              <div className="text-[13px] text-text mt-0.5">{ml.explanation}</div>
+              <div className="text-[12px] text-muted mt-1">
+                Cycles anormaux consécutifs : <span className="font-mono tnum">{ml.consecutive}/{ml.persist_target}</span>
+                {' '}— au seuil, la reprise se déclenche automatiquement.
+              </div>
+            </div>
+          ) : (
+            <p className="text-[13px] text-muted">Trafic conforme au profil appris. Lancez une attaque pour voir la détection puis la reprise.</p>
+          )}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+/* ---------- panneau REPRISE ---------- */
+function Remediation({ actions }) {
+  return (
+    <Panel title="Reprise autonome" hint="Actions décidées et vérifiées sans intervention humaine.">
+      {actions.length === 0 ? (
+        <p className="text-[13px] text-muted">Aucune action — le système est sain.</p>
+      ) : (
+        <ol className="space-y-2">
+          {actions.map((a, i) => (
+            <li key={i} className="rounded-lg bg-raised border border-line px-3 py-2">
+              <div className="flex items-center justify-between">
+                <span className="font-mono tnum text-[12px] text-muted">{a.ts?.slice(11, 19)}</span>
+                <Pill color={a.result === 'success' ? 'money' : 'warn'}>
+                  {a.result === 'success' ? `rétabli en ${a.recovery_seconds}s` : a.result}
+                </Pill>
+              </div>
+              <div className="text-[13px] mt-1">
+                <span className="text-accent">{a.action}</span> → <span className="text-text">{a.target}</span>
+              </div>
+              {a.reason && <div className="text-[12px] text-muted mt-0.5">{a.reason}</div>}
+            </li>
+          ))}
+        </ol>
+      )}
+    </Panel>
+  )
+}
+
+/* ---------- application ---------- */
 export default function App() {
+  const [token, setToken] = useState(null)
+  const [offline, setOffline] = useState(false)
+  const [accounts, setAccounts] = useState([])
+  const [txs, setTxs] = useState([])
   const [ml, setMl] = useState(null)
   const [actions, setActions] = useState([])
-  const [health, setHealth] = useState({ ml: false, rem: false })
-  const [tx, setTx] = useState(null)
-  const [err, setErr] = useState(null)
+  const [health, setHealth] = useState({ ml: false, rem: false, pay: false })
+  const [toast, setToast] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const flash = useRef(false)
 
-  const poll = useCallback(async () => {
-    try {
-      const [state, acts, mlh, remh] = await Promise.allSettled([
-        j('/api/ml/state'), j('/api/remediation/actions'),
-        j('/api/ml/health'), j('/api/remediation/health'),
-      ])
-      if (state.status === 'fulfilled') setMl(state.value)
-      if (acts.status === 'fulfilled') setActions(acts.value)
-      setHealth({ ml: mlh.status === 'fulfilled', rem: remh.status === 'fulfilled' })
-      setErr(null)
-    } catch (e) { setErr(String(e)) }
+  // connexion auto (démo)
+  useEffect(() => {
+    (async () => {
+      try {
+        const { access_token } = await api('/api/auth/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'demo', password: 'demo1234' }),
+        })
+        setToken(access_token)
+      } catch { setOffline(true) }
+    })()
   }, [])
 
-  useEffect(() => { poll(); const id = setInterval(poll, 2000); return () => clearInterval(id) }, [poll])
-
-  async function runTestTransaction() {
-    setTx({ state: 'running' })
+  const loadPayment = useCallback(async (t) => {
     try {
-      const { access_token } = await j('/api/auth/login', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'demo', password: 'demo1234' }),
+      const [a, x] = await Promise.all([
+        api('/api/payment/accounts', { headers: authHeader(t) }),
+        api('/api/payment/transactions?limit=10', { headers: authHeader(t) }),
+      ])
+      setAccounts(a); setTxs(x); setHealth((h) => ({ ...h, pay: true }))
+    } catch { setHealth((h) => ({ ...h, pay: false })) }
+  }, [])
+
+  // supervision (IA + reprise + santé) toutes les 2s
+  useEffect(() => {
+    const poll = async () => {
+      const [s, acts, mh, rh] = await Promise.allSettled([
+        api('/api/ml/state'), api('/api/remediation/actions'),
+        api('/api/ml/health'), api('/api/remediation/health'),
+      ])
+      if (s.status === 'fulfilled') setMl(s.value)
+      if (acts.status === 'fulfilled') setActions(acts.value)
+      setHealth((h) => ({ ...h, ml: mh.status === 'fulfilled', rem: rh.status === 'fulfilled' }))
+    }
+    poll(); const id = setInterval(poll, 2000); return () => clearInterval(id)
+  }, [])
+
+  // paiement : après login puis toutes les 5s
+  useEffect(() => {
+    if (!token) return
+    loadPayment(token); const id = setInterval(() => loadPayment(token), 5000); return () => clearInterval(id)
+  }, [token, loadPayment])
+
+  const onTransfer = async (body) => {
+    setBusy(true)
+    try {
+      const res = await api('/api/payment/transactions', {
+        method: 'POST', headers: { ...authHeader(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       })
-      const auth = { Authorization: `Bearer ${access_token}` }
-      const accounts = await j('/api/payment/accounts', { headers: auth })
-      if (accounts.length < 2) throw new Error('comptes insuffisants')
-      const res = await j('/api/payment/transactions', {
-        method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from_account: accounts[0].id, to_account: accounts[1].id, amount: 1 }),
-      })
-      setTx({ state: 'ok', id: res.transaction_id })
-    } catch (e) { setTx({ state: 'ko', msg: String(e) }) }
+      setToast({ ok: true, msg: `Paiement #${res.transaction_id} réglé` })
+      flash.current = true
+      await loadPayment(token)
+    } catch (e) {
+      setToast({ ok: false, msg: `Paiement refusé (${String(e).includes('400') ? 'solde insuffisant' : 'service indisponible'})` })
+    } finally {
+      setBusy(false); setTimeout(() => setToast(null), 3500)
+    }
   }
 
   const anomaly = ml?.flag === 1
-  const phase = ml?.status || '—'
+  const allUp = health.ml && health.rem && health.pay
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans">
-      <header className="border-b border-slate-700/60 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">PROJECT RESILIENCE-ALPHA</h1>
-          <p className="text-xs text-slate-400">Supervision — détection &amp; reprise autonome</p>
-        </div>
-        <div className={`px-3 py-1 rounded-full text-sm font-medium ${anomaly ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
-          {anomaly ? '⚠ Incident détecté' : '● Service nominal'}
+    <div className="min-h-screen">
+      {/* barre supérieure */}
+      <header className="sticky top-0 z-10 bg-ink/90 backdrop-blur border-b border-line">
+        <div className="max-w-6xl mx-auto px-5 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="10" stroke="#5B8DEF" strokeWidth="1.6" />
+              <path d="M8 13.5c0 1.4 1.4 2.5 4 2.5s4-.8 4-2.2c0-3-7.5-1.3-7.5-4.3C8.5 8 9.8 7 12 7s4 1 4 2.4" stroke="#35D6A4" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            <div className="leading-tight">
+              <div className="font-bold text-[16px]">Numis</div>
+              <div className="text-[11px] text-muted -mt-0.5">paiements · supervision</div>
+            </div>
+          </div>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-medium ${anomaly ? 'bg-alert/15 text-alert' : 'bg-money/15 text-money'}`}>
+            <span className={`w-2 h-2 rounded-full ${anomaly ? 'bg-alert' : 'bg-money'}`} />
+            {anomaly ? 'Incident en cours' : 'Système sain'}
+          </div>
         </div>
       </header>
 
-      <main className="p-6 grid gap-4 md:grid-cols-3">
-        <Card title="État des composants">
-          <ul className="space-y-2 text-sm">
-            <li className="flex items-center gap-2"><Dot ok={health.ml} /> Détecteur ML <span className="text-slate-400">({phase})</span></li>
-            <li className="flex items-center gap-2"><Dot ok={health.rem} /> Moteur de remédiation</li>
-            <li className="flex items-center gap-2"><Dot ok={!anomaly} /> API de paiement</li>
-          </ul>
-          <a href={GRAFANA} target="_blank" rel="noreferrer"
-             className="mt-4 inline-block text-xs text-sky-400 hover:underline">Ouvrir Grafana (SOC) →</a>
-        </Card>
+      <main className="max-w-6xl mx-auto px-5 py-6">
+        {/* état des composants */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-5 text-[13px]">
+          <span className="text-muted">Composants :</span>
+          <span className="flex items-center gap-2"><Dot ok={health.pay} /> API de paiement</span>
+          <span className="flex items-center gap-2"><Dot ok={health.ml} /> Détecteur IA</span>
+          <span className="flex items-center gap-2"><Dot ok={health.rem} /> Moteur de reprise</span>
+          <a href={`http://${location.hostname}:3000`} target="_blank" rel="noreferrer"
+             className="ml-auto text-accent hover:underline">Ouvrir Grafana (métriques & logs)</a>
+        </div>
 
-        <Card title="Détection ML" accent={anomaly ? 'ring-1 ring-rose-500/50' : ''}>
-          {ml ? (
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-slate-400">Phase</span><span>{phase}</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Score</span><span>{ml.score ?? '—'}</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Cycles anormaux</span><span>{ml.consecutive}</span></div>
-              {ml.features && (
-                <div className="pt-2 border-t border-slate-700/60 space-y-1">
-                  {Object.entries(ml.features).map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-xs"><span className="text-slate-400">{k}</span><span>{Number(v).toFixed(3)}</span></div>
-                  ))}
-                </div>
-              )}
-              {anomaly && ml.explanation && (
-                <p className="mt-2 text-xs text-rose-300">Cause : {ml.explanation}</p>
-              )}
-            </div>
-          ) : <p className="text-slate-500 text-sm">En attente…</p>}
-        </Card>
-
-        <Card title="Transaction témoin">
-          <p className="text-xs text-slate-400 mb-3">Preuve que le métier est utilisable (avant / après incident).</p>
-          <button onClick={runTestTransaction}
-                  className="w-full rounded-lg bg-sky-600 hover:bg-sky-500 px-3 py-2 text-sm font-medium transition">
-            Exécuter une transaction
-          </button>
-          {tx?.state === 'running' && <p className="mt-2 text-xs text-slate-400">En cours…</p>}
-          {tx?.state === 'ok' && <p className="mt-2 text-xs text-emerald-300">✓ Transaction #{tx.id} réussie</p>}
-          {tx?.state === 'ko' && <p className="mt-2 text-xs text-rose-300">✗ Échec : {tx.msg}</p>}
-        </Card>
-
-        <div className="md:col-span-3">
-          <Card title="Historique de remédiation (reprise autonome)">
-            {actions.length === 0 ? (
-              <p className="text-slate-500 text-sm">Aucune action — le système est sain.</p>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="text-slate-400 text-xs uppercase tracking-wider">
-                  <tr><th className="text-left py-1">Heure</th><th className="text-left">Cible</th><th className="text-left">Action</th><th className="text-left">Cause</th><th className="text-left">Résultat</th><th className="text-right">Reprise</th></tr>
-                </thead>
-                <tbody>
-                  {actions.map((a, i) => (
-                    <tr key={i} className="border-t border-slate-700/40">
-                      <td className="py-1.5">{a.ts?.slice(11, 19)}</td>
-                      <td>{a.target}</td>
-                      <td>{a.action}</td>
-                      <td className="text-slate-400 max-w-xs truncate">{a.reason}</td>
-                      <td className={a.result === 'success' ? 'text-emerald-300' : 'text-amber-300'}>{a.result}</td>
-                      <td className="text-right">{a.recovery_seconds ? `${a.recovery_seconds}s` : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Card>
+        <div className="grid lg:grid-cols-2 gap-5 items-start">
+          <div className={flash.current ? 'flash-money rounded-2xl' : ''} onAnimationEnd={() => (flash.current = false)}>
+            <Payment token={token} accounts={accounts} txs={txs} onTransfer={onTransfer} offline={offline} busy={busy} />
+          </div>
+          <div className="space-y-5">
+            <Ai ml={ml} />
+            <Remediation actions={actions} />
+          </div>
         </div>
       </main>
-      {err && <p className="px-6 pb-4 text-xs text-slate-600">dernier poll : {err}</p>}
+
+      {/* toast */}
+      {toast && (
+        <div className={`fixed bottom-5 right-5 px-4 py-3 rounded-xl border text-[14px] shadow-lg ${toast.ok ? 'bg-money/15 border-money/40 text-money' : 'bg-alert/15 border-alert/40 text-alert'}`}>
+          {toast.msg}
+        </div>
+      )}
     </div>
   )
 }

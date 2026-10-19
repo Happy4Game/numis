@@ -1,3 +1,22 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; }
+  body { @apply bg-ink text-text font-sans; }
+  /* chiffres alignés pour les montants et la télémétrie */
+  .tnum { font-variant-numeric: tabular-nums; }
+}
+
+@keyframes pulse-money { 0% { background-color: rgba(53,214,164,.18);} 100% { background-color: transparent; } }
+.flash-money { animation: pulse-money 1.1s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-money { animation: none; }
+  * { transition: none !important; }
+}
+
+/* scrollbar discrète */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #27324F; border-radius: 6px; }

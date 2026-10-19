@@ -58,7 +58,9 @@ G_FEATURE = Gauge("ml_feature_value", "Valeur courante des features", ["feature"
 app = FastAPI(title="RSA ML Detector")
 
 state = {"status": "warmup", "samples": 0, "score": None, "flag": 0,
-         "features": {}, "explanation": "", "last_action": None, "consecutive": 0}
+         "features": {}, "explanation": "", "last_action": None, "consecutive": 0,
+         "warmup_target": WARMUP_SAMPLES, "persist_target": PERSIST,
+         "poll_interval": POLL, "baseline": None, "score_history": []}
 model = {"clf": None, "mean": None, "std": None}
 _last_action_ts = 0.0
 
@@ -125,6 +127,7 @@ def detection_loop():
     clf = IsolationForest(n_estimators=100, contamination=0.1, random_state=42)
     clf.fit(X)
     model["clf"] = clf
+    state["baseline"] = {f: round(float(m), 4) for f, m in zip(FEATURES, model["mean"])}
     state["status"] = "monitoring"
     log.info("warmup terminé, passage en surveillance",
              extra={"extra_fields": {"mean": model["mean"].tolist()}})
@@ -136,6 +139,8 @@ def detection_loop():
         score = float(clf.decision_function(x)[0])   # <0 => anormal
         is_anom = int(clf.predict(x)[0] == -1)
         G_SCORE.set(score); G_FLAG.set(is_anom)
+        hist = state["score_history"]; hist.append(round(score, 4))
+        del hist[:-40]  # ne garde que les 40 derniers points
         state.update(features=vec, score=round(score, 4), flag=is_anom)
 
         if is_anom:
