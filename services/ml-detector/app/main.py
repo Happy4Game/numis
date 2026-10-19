@@ -40,7 +40,7 @@ POLL = int(os.getenv("POLL_INTERVAL_SECONDS", "10"))
 PERSIST = int(os.getenv("ANOMALY_PERSIST_CYCLES", "2"))
 WARMUP_SAMPLES = int(os.getenv("WARMUP_SAMPLES", "20"))
 TARGET_CONTAINER = os.getenv("TARGET_CONTAINER", "rsa-payment-api")
-COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "90"))  # pas de ré-action juste après une reprise
+COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "30"))  # pas de ré-action juste après une reprise
 MODEL_PATH = os.getenv("MODEL_PATH", "/model/model.pkl")
 ERR_DEGRADE = float(os.getenv("ERROR_DEGRADE", "0.05"))           # taux de 5xx -> dégradation
 LAT_DEGRADE = float(os.getenv("LATENCY_DEGRADE_SECONDS", "0.3"))  # latence p95 -> dégradation
@@ -231,9 +231,11 @@ def detection_loop():
             else:
                 _decision(f"Incident persistant (cycle {state['consecutive']}/{PERSIST})", "anomaly")
             if state["consecutive"] >= PERSIST:
-                _decision("Seuil atteint → je décide d'engager une remédiation", "decision")
-                trigger_remediation(state["explanation"])
-                state["consecutive"] = 0
+                if time.time() - _last_action_ts >= COOLDOWN:
+                    _decision("Seuil atteint → je décide d'engager une remédiation", "decision")
+                    trigger_remediation(state["explanation"])
+                    state["consecutive"] = 0
+                # sinon : une action a déjà été prise récemment (cooldown) — on attend sans ré-agir
         else:
             state["reasoning"] = f"J'observe le trafic (score {score:.2f}) — conforme au profil appris."
             if was > 0:
