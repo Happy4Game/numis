@@ -355,6 +355,67 @@ function Containers({ items }) {
   )
 }
 
+/* ---------- menu des services (tous les conteneurs) ---------- */
+const SVC = {
+  'rsa-db':           { label: 'Base de données',   desc: 'PostgreSQL — comptes & transactions', icon: '🗄️' },
+  'rsa-auth':         { label: 'Authentification',  desc: 'Émission des jetons JWT',              icon: '🔑' },
+  'rsa-payment-api':  { label: 'API de paiement',   desc: 'Traitement des transactions',         icon: '💳' },
+  'rsa-waf':          { label: 'WAF',               desc: 'Pare-feu applicatif (ModSecurity)',    icon: '🛡️' },
+  'rsa-prometheus':   { label: 'Prometheus',        desc: 'Collecte des métriques',               icon: '📈' },
+  'rsa-alertmanager': { label: 'Alertmanager',      desc: 'Alertes SOC',                          icon: '🚨' },
+  'rsa-loki':         { label: 'Loki',              desc: 'Centralisation des logs',              icon: '📚' },
+  'rsa-promtail':     { label: 'Promtail',          desc: 'Collecte des journaux',                icon: '🪵' },
+  'rsa-grafana':      { label: 'Grafana',           desc: 'Dashboards & visualisation',           icon: '📊' },
+  'rsa-ml-detector':  { label: 'Détecteur IA',      desc: "Détection d'anomalies (ML)",           icon: '🧠' },
+  'rsa-remediation':  { label: 'Moteur de reprise', desc: 'Remédiation + watchdog',               icon: '🔧' },
+  'rsa-ollama':       { label: 'Ollama',            desc: 'LLM local (assistant)',                icon: '🤖' },
+  'rsa-rag':          { label: 'Assistant RAG',     desc: 'Réponses sur vos documents',           icon: '💬' },
+  'rsa-frontend':     { label: 'Dashboard',         desc: 'Cette interface',                      icon: '🖥️' },
+}
+
+function ServicesMenu({ items }) {
+  const [open, setOpen] = useState(false)
+  const total = items.length
+  const up = items.filter((c) => c.status === 'running').length
+  const allUp = total > 0 && up === total
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] bg-raised border border-line hover:border-accent">
+        <span className={`w-2 h-2 rounded-full ${allUp ? 'bg-money' : 'bg-warn'}`} />
+        Services <span className="font-mono tnum text-muted">{total ? `${up}/${total}` : '—'}</span>
+        <span className="text-muted text-[10px]">▼</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-2 w-80 z-20 rounded-xl border border-line bg-panel shadow-2xl p-2 max-h-[72vh] overflow-auto anim-fadeup">
+            <div className="px-2 py-1 text-[11px] text-muted">Conteneurs de la stack ({up}/{total} actifs)</div>
+            {items.length === 0 && <div className="px-2 py-2 text-[13px] text-muted">Chargement…</div>}
+            {items.map((c) => {
+              const m = SVC[c.name] || { label: c.name.replace('rsa-', ''), desc: '', icon: '📦' }
+              const run = c.status === 'running'
+              return (
+                <div key={c.name} className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-raised">
+                  <span className="text-[16px] leading-none">{m.icon}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] text-text flex items-center gap-2">
+                      {m.label}
+                      <span className={`w-2 h-2 rounded-full ${run ? 'bg-money' : 'bg-alert'}`} />
+                    </div>
+                    {m.desc && <div className="text-[11px] text-muted truncate">{m.desc}</div>}
+                  </div>
+                  <span className={`text-[11px] ${run ? 'text-money' : 'text-alert'}`}>{c.status}</span>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 /* ---------- application ---------- */
 export default function App() {
   const [token, setToken] = useState(null)
@@ -447,9 +508,12 @@ export default function App() {
               <div className="text-[11px] text-muted -mt-0.5">paiements · supervision</div>
             </div>
           </div>
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-medium ${anomaly ? 'bg-alert/15 text-alert' : 'bg-money/15 text-money'}`}>
-            <span className={`w-2 h-2 rounded-full ${anomaly ? 'bg-alert' : 'bg-money'}`} />
-            {anomaly ? 'Incident en cours' : 'Système sain'}
+          <div className="flex items-center gap-3">
+            <ServicesMenu items={containers} />
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-medium ${anomaly ? 'bg-alert/15 text-alert' : 'bg-money/15 text-money'}`}>
+              <span className={`w-2 h-2 rounded-full ${anomaly ? 'bg-alert' : 'bg-money'}`} />
+              {anomaly ? 'Incident en cours' : 'Système sain'}
+            </div>
           </div>
         </div>
       </header>
