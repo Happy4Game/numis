@@ -11,6 +11,7 @@ import threading
 import glob
 import logging, json, sys, time
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -46,15 +47,25 @@ PROMPT = (
 )
 
 
+def _generate(prompt_value):
+    """Génération via l'API Ollama en direct (robuste aux versions de langchain-ollama)."""
+    text = prompt_value.to_string()
+    r = httpx.post(f"{OLLAMA_URL}/api/generate",
+                   json={"model": MODEL, "prompt": text, "stream": False,
+                         "options": {"temperature": 0.1}},
+                   timeout=120.0)
+    r.raise_for_status()
+    return r.json().get("response", "").strip()
+
+
 def build_index():
     try:
-        from langchain_ollama import ChatOllama, OllamaEmbeddings
+        from langchain_ollama import OllamaEmbeddings
         from langchain_chroma import Chroma
         from langchain_community.document_loaders import TextLoader
         from langchain_text_splitters import RecursiveCharacterTextSplitter
-        from langchain_core.prompts import ChatPromptTemplate
-        from langchain_core.runnables import RunnablePassthrough
-        from langchain_core.output_parsers import StrOutputParser
+        from langchain_core.prompts import PromptTemplate
+        from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 
         docs = []
         for path in glob.glob(f"{DOCS_PATH}/**/*.md", recursive=True):
@@ -68,15 +79,15 @@ def build_index():
         emb = OllamaEmbeddings(base_url=OLLAMA_URL, model=EMBED_MODEL)
         store = Chroma.from_documents(splits, emb, persist_directory="/tmp/chroma")
         retriever = store.as_retriever(search_kwargs={"k": 4})
-        llm = ChatOllama(base_url=OLLAMA_URL, model=MODEL, temperature=0.1)
-        prompt = ChatPromptTemplate.from_template(PROMPT)
+        prompt = PromptTemplate.from_template(PROMPT)
 
         def fmt(d):
             return "\n\n".join(x.page_content for x in d)
 
+        # LangChain orchestre (retrieval + prompt) ; la génération appelle Ollama en direct.
         _rag["chain"] = (
             {"context": retriever | fmt, "question": RunnablePassthrough()}
-            | prompt | llm | StrOutputParser()
+            | prompt | RunnableLambda(_generate)
         )
         _rag.update(status="ready", chunks=len(splits))
         log.info("index prêt", )
@@ -92,7 +103,7 @@ def _start():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "index": _rag["status"], "chunks": _rag["chunks"]}
+    return {"status": "ok", "index": _rag["status"], "chunks": _rag["chunks"], "error": _rag["error"]}
 
 
 @app.post("/reindex")
@@ -106,5 +117,9 @@ def reindex():
 def ask(body: AskIn):
     if _rag["status"] != "ready" or _rag["chain"] is None:
         raise HTTPException(503, f"index indisponible (état: {_rag['status']})")
-    answer = _rag["chain"].invoke(body.question)
+    try:
+        answer = _rag["chain"].invoke(body.question)
+    except Exception as e:
+        log.error(f"échec génération: {e}")
+        raise HTTPException(500, f"échec génération: {e}")
     return {"question": body.question, "answer": answer}
