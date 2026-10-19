@@ -3,6 +3,9 @@
 
 SHELL := /bin/bash
 
+# Cible des attaques (local par défaut ; démo réseau : make attack-dos TARGET=http://192.168.137.1:8080)
+TARGET ?= http://localhost:8080
+
 .PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-sqli clean
 
 help:            ## Affiche cette aide
@@ -36,10 +39,10 @@ ps:              ## État des conteneurs
 	docker compose ps
 
 attack-dos:      ## (depuis PC Attaquant) lance le scénario DoS contrôlé
-	python attack/scenarios/dos_flood.py --target http://192.168.137.1:8080
+	python3 attack/scenarios/dos_flood.py --target $(TARGET)
 
 attack-sqli:     ## (depuis PC Attaquant) lance la tentative d'injection SQL
-	python attack/scenarios/sqli_probe.py --target http://192.168.137.1:8080
+	python3 attack/scenarios/sqli_probe.py --target $(TARGET)
 
 clean:           ## Supprime conteneurs + volumes (reset complet)
 	docker compose down -v
