@@ -212,6 +212,13 @@ function Payment({ token, accounts, txs, onTransfer, offline, busy, fill }) {
             </select>
           </label>
         </div>
+        <div className="flex justify-center -my-1">
+          <button type="button" onClick={() => { setFrom(to); setTo(from) }}
+            title="Inverser les comptes"
+            className="flex items-center gap-1.5 text-[12px] text-sky2 hover:text-text px-3 py-1 rounded-full bg-raised/60 border border-line hover:border-accent">
+            <span className="text-[13px] leading-none">⇄</span> Inverser
+          </button>
+        </div>
         <label className="block">
           <span className="text-[11.5px] uppercase tracking-wider text-faint">Montant</span>
           <div className="relative mt-1">
