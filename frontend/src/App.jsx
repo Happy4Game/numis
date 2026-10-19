@@ -18,10 +18,10 @@ const signalFmt = {
 }
 
 /* ---------- briques UI ---------- */
-function Panel({ title, hint, children, tone }) {
+function Panel({ title, hint, children, tone, extra }) {
   const ring = tone === 'alert' ? 'ring-1 ring-alert/60' : tone === 'warn' ? 'ring-1 ring-warn/50' : ''
   return (
-    <section className={`rounded-2xl bg-panel border border-line ${ring}`}>
+    <section className={`rounded-2xl bg-panel border border-line anim-fadeup card-hover ${ring} ${extra || ''}`}>
       <header className="px-5 pt-4 pb-3 border-b border-line/70">
         <h2 className="text-[15px] font-semibold text-text">{title}</h2>
         {hint && <p className="text-[13px] text-muted mt-0.5 leading-snug">{hint}</p>}
@@ -125,7 +125,7 @@ function Payment({ token, accounts, txs, onTransfer, offline, busy }) {
         {accounts.map((a) => (
           <div key={a.id} className="rounded-xl bg-raised border border-line px-4 py-3">
             <div className="text-[12px] text-muted">{a.label}</div>
-            <div className="text-[22px] font-semibold font-mono tnum text-money mt-1">{euro(a.balance)}</div>
+            <div key={a.balance} className="text-[22px] font-semibold font-mono tnum text-money mt-1 anim-pop">{euro(a.balance)}</div>
           </div>
         ))}
         {accounts.length === 0 && <div className="col-span-2 text-[13px] text-muted">Chargement des comptes…</div>}
@@ -203,7 +203,7 @@ function DecisionFeed({ items }) {
         {items.map((d, i) => {
           const k = KIND[d.kind] || KIND.info
           return (
-            <li key={i} className="flex gap-2 text-[12px] leading-snug">
+            <li key={i} className="flex gap-2 text-[12px] leading-snug anim-slidein">
               <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${k.b}`} />
               <span className="font-mono tnum text-muted/70 shrink-0">{d.ts}</span>
               <span className={k.c}>{d.text}</span>
@@ -233,6 +233,7 @@ function Ai({ ml }) {
       title={<span className="flex items-center gap-2">Détecteur d'anomalies (IA) {phasePill}</span>}
       hint="Isolation Forest sur le trafic de l'API de paiement."
       tone={tone}
+      extra={anomaly ? 'anim-glow' : ''}
     >
       {ml.reasoning && <p className="text-[13px] text-text/80 italic mb-4">« {ml.reasoning} »</p>}
 
@@ -243,7 +244,7 @@ function Ai({ ml }) {
             <span className="font-mono tnum">{ml.samples}/{ml.warmup_target} observations</span>
           </div>
           <div className="h-2 rounded-full bg-ink overflow-hidden">
-            <div className="h-full bg-accent transition-all" style={{ width: pct + '%' }} />
+            <div className="h-full bg-accent transition-all anim-pulse" style={{ width: pct + '%' }} />
           </div>
           <p className="text-[12px] text-muted mt-2">
             ~{Math.max(0, (ml.warmup_target - ml.samples) * (ml.poll_interval || 10))} s restantes au rythme actuel.
@@ -305,7 +306,7 @@ function Remediation({ actions }) {
       ) : (
         <ol className="space-y-3">
           {actions.map((a, i) => (
-            <li key={i} className="rounded-lg bg-raised border border-line px-3 py-2.5">
+            <li key={i} className="rounded-lg bg-raised border border-line px-3 py-2.5 anim-slidein">
               <div className="flex items-center justify-between">
                 <span className="font-mono tnum text-[12px] text-muted">{a.ts?.slice(11, 19)}</span>
                 <Pill color={a.result === 'success' ? 'money' : 'warn'}>
@@ -331,6 +332,29 @@ function Remediation({ actions }) {
   )
 }
 
+/* ---------- état des conteneurs ---------- */
+function Containers({ items }) {
+  if (!items || items.length === 0) return null
+  return (
+    <Panel title="État des conteneurs (watchdog)"
+           hint="Surveillance de vie de toute la stack — réparation automatique en cas de panne.">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+        {items.map((c) => {
+          const up = c.status === 'running'
+          return (
+            <div key={c.name}
+                 className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] anim-fadeup ${up ? 'border-line bg-raised' : 'border-alert/50 bg-alert/10'}`}>
+              <span className={`w-2.5 h-2.5 rounded-full ${up ? 'bg-money' : 'bg-alert anim-pulse'}`} />
+              <span className="truncate">{c.name.replace('rsa-', '')}</span>
+              {!up && <span className="ml-auto text-[11px] text-alert">{c.status}</span>}
+            </div>
+          )
+        })}
+      </div>
+    </Panel>
+  )
+}
+
 /* ---------- application ---------- */
 export default function App() {
   const [token, setToken] = useState(null)
@@ -339,6 +363,7 @@ export default function App() {
   const [txs, setTxs] = useState([])
   const [ml, setMl] = useState(null)
   const [actions, setActions] = useState([])
+  const [containers, setContainers] = useState([])
   const [health, setHealth] = useState({ ml: false, rem: false, pay: false })
   const [toast, setToast] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -413,17 +438,17 @@ export default function App() {
       <header className="sticky top-0 z-10 bg-ink/90 backdrop-blur border-b border-line">
         <div className="max-w-6xl mx-auto px-5 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden className="anim-float">
               <circle cx="12" cy="12" r="10" stroke="#5B8DEF" strokeWidth="1.6" />
               <path d="M8 13.5c0 1.4 1.4 2.5 4 2.5s4-.8 4-2.2c0-3-7.5-1.3-7.5-4.3C8.5 8 9.8 7 12 7s4 1 4 2.4" stroke="#35D6A4" strokeWidth="1.6" strokeLinecap="round" />
             </svg>
             <div className="leading-tight">
-              <div className="font-bold text-[16px]">Numis</div>
+              <div className="font-bold text-[16px] shimmer-text">Numis</div>
               <div className="text-[11px] text-muted -mt-0.5">paiements · supervision</div>
             </div>
           </div>
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-medium ${anomaly ? 'bg-alert/15 text-alert' : 'bg-money/15 text-money'}`}>
-            <span className={`w-2 h-2 rounded-full ${anomaly ? 'bg-alert' : 'bg-money'}`} />
+            <span className={`w-2 h-2 rounded-full ${anomaly ? 'bg-alert anim-pulse' : 'bg-money'}`} />
             {anomaly ? 'Incident en cours' : 'Système sain'}
           </div>
         </div>
@@ -439,6 +464,8 @@ export default function App() {
           <a href={`http://${location.hostname}:3000`} target="_blank" rel="noreferrer"
              className="ml-auto text-accent hover:underline">Ouvrir Grafana (métriques & logs)</a>
         </div>
+
+        <div className="mb-5"><Containers items={containers} /></div>
 
         <div className="grid lg:grid-cols-2 gap-5 items-start">
           <div className={flash.current ? 'flash-money rounded-2xl' : ''} onAnimationEnd={() => (flash.current = false)}>

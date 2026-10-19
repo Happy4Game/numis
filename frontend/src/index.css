@@ -20,3 +20,39 @@
 /* scrollbar discrète */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #27324F; border-radius: 6px; }
+
+/* ======================= Animations ======================= */
+@keyframes fadeup   { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes slidein  { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+@keyframes glowpulse{ 0%,100% { box-shadow: 0 0 0 0 rgba(242,109,109,0); } 50% { box-shadow: 0 0 26px 3px rgba(242,109,109,.40); } }
+@keyframes softpulse{ 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+@keyframes floaty   { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes popin    { 0% { transform: scale(.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes shimmer  { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+@keyframes spin360  { to { transform: rotate(360deg); } }
+@keyframes blink    { 0%,100% { opacity: 1; } 50% { opacity: .2; } }
+
+.anim-fadeup  { animation: fadeup .55s cubic-bezier(.22,1,.36,1) both; }
+.anim-slidein { animation: slidein .4s ease both; }
+.anim-glow    { animation: glowpulse 1.6s ease-in-out infinite; }
+.anim-pulse   { animation: softpulse 1.3s ease-in-out infinite; }
+.anim-float   { animation: floaty 3.2s ease-in-out infinite; }
+.anim-pop     { animation: popin .3s ease both; }
+.anim-blink   { animation: blink 1s step-start infinite; }
+.anim-spin    { animation: spin360 1s linear infinite; }
+
+.card-hover { transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
+.card-hover:hover { transform: translateY(-3px); box-shadow: 0 10px 30px -12px rgba(0,0,0,.6); border-color: #38466b; }
+
+/* dégradé animé pour l'en-tête */
+.shimmer-text {
+  background: linear-gradient(100deg, #E8EDF6 10%, #5B8DEF 30%, #35D6A4 50%, #E8EDF6 70%);
+  background-size: 200% auto;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: shimmer 6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; }
+  .shimmer-text { color: #E8EDF6; }
+}

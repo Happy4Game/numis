@@ -13,6 +13,7 @@ MODÈLE DE PRIVILÈGES (sujet §3.4 — "privilèges maîtrisés", point noté) 
 import os
 import time
 import datetime
+import threading
 from collections import deque
 from zoneinfo import ZoneInfo
 
@@ -107,6 +108,67 @@ def _container_down(name: str) -> bool:
         return False
 
 
+# ---- Watchdog : surveille TOUS les conteneurs de la stack et répare ceux qui tombent ----
+PROJECT = os.getenv("COMPOSE_PROJECT", "resilience-alpha")
+SELF_NAME = os.getenv("SELF_CONTAINER", "rsa-remediation")
+WATCH_INTERVAL = int(os.getenv("WATCH_INTERVAL_SECONDS", "10"))
+WATCH_COOLDOWN = int(os.getenv("WATCH_COOLDOWN_SECONDS", "60"))
+_watch_last = {}  # nom -> dernier redémarrage (anti-flapping)
+
+
+def _managed_containers():
+    try:
+        return client.containers.list(all=True,
+                                      filters={"label": f"com.docker.compose.project={PROJECT}"})
+    except Exception:
+        return []
+
+
+def _wait_running(name, timeout_s=30) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            c = client.containers.get(name)
+            c.reload()
+            if c.status == "running":
+                return True
+        except Exception:
+            pass
+        time.sleep(1.5)
+    return False
+
+
+def _watchdog():
+    log.info("watchdog démarré", extra={"extra_fields": {"interval": WATCH_INTERVAL}})
+    while True:
+        try:
+            for c in _managed_containers():
+                name = c.name
+                if name == SELF_NAME or c.status == "running":
+                    continue
+                if time.time() - _watch_last.get(name, 0) < WATCH_COOLDOWN:
+                    continue
+                _watch_last[name] = time.time()
+                entry = {"ts": _now().strftime("%Y-%m-%dT%H:%M:%S"), "target": name,
+                         "action": "restart", "reason": f"conteneur {c.status}", "source": "watchdog",
+                         "result": "pending",
+                         "steps": [f"Surveillance : conteneur {name} = {c.status} → redémarrage"]}
+                try:
+                    c.restart(timeout=10)
+                    ok = _wait_running(name)
+                    entry["steps"].append(f"Vérification : {name} = {'running' if ok else 'toujours KO'}")
+                    entry["result"] = "success" if ok else "unverified"
+                    ACTIONS_TOTAL.labels("restart", name, entry["result"]).inc()
+                except Exception as e:
+                    entry["steps"].append(f"Échec : {e}")
+                    entry["result"] = "error"
+                history.appendleft(entry)
+                log.info("watchdog : redémarrage", extra={"extra_fields": entry})
+        except Exception as e:
+            log.warning(f"watchdog erreur : {e}")
+        time.sleep(WATCH_INTERVAL)
+
+
 def _decide() -> str:
     """Playbook : service injoignable => conteneur planté => restart.
     Service vivant mais dégradé (flood) => délestage de charge."""
@@ -128,6 +190,18 @@ def _do_throttle() -> float:
                headers={"x-remediation-token": TOKEN},
                json={"enabled": True, "rps": THROTTLE_RPS})
     return _verify_recovery()
+
+
+@app.on_event("startup")
+def _start():
+    threading.Thread(target=_watchdog, daemon=True).start()
+
+
+@app.get("/containers")
+def containers():
+    """État de vie de tous les conteneurs de la stack (consommé par le dashboard)."""
+    return sorted(({"name": c.name, "status": c.status} for c in _managed_containers()),
+                  key=lambda x: x["name"])
 
 
 @app.get("/health")

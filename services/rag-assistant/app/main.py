@@ -47,19 +47,32 @@ PROMPT = (
 )
 
 
+def _ensure_model(name):
+    """Télécharge le modèle dans Ollama s'il n'est pas déjà présent (idempotent)."""
+    try:
+        r = httpx.post(f"{OLLAMA_URL}/api/pull",
+                       json={"model": name, "name": name, "stream": False}, timeout=900.0)
+        log.info(f"modèle {name} prêt ({r.status_code})")
+    except Exception as e:
+        log.warning(f"pull {name} a échoué (sera retenté) : {e}")
+
+
 def _generate(prompt_value):
     """Génération via l'API Ollama en direct (robuste aux versions de langchain-ollama)."""
     text = prompt_value.to_string()
     r = httpx.post(f"{OLLAMA_URL}/api/generate",
                    json={"model": MODEL, "prompt": text, "stream": False,
                          "options": {"temperature": 0.1}},
-                   timeout=120.0)
-    r.raise_for_status()
+                   timeout=180.0)
+    if r.status_code != 200:
+        raise RuntimeError(f"Ollama {r.status_code}: {r.text[:200]}")
     return r.json().get("response", "").strip()
 
 
 def build_index():
     try:
+        _ensure_model(EMBED_MODEL)   # embeddings
+        _ensure_model(MODEL)         # génération
         from langchain_ollama import OllamaEmbeddings
         from langchain_chroma import Chroma
         from langchain_community.document_loaders import TextLoader
