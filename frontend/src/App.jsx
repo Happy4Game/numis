@@ -538,8 +538,8 @@ function ServicesMenu({ items }) {
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-2 w-80 z-20 rounded-xl border border-hair glass shadow-2xl p-2 max-h-[72vh] overflow-auto anim-fadeup">
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-2 w-80 z-50 rounded-xl border border-hair glass shadow-2xl p-2 max-h-[72vh] overflow-auto anim-fadeup">
             <div className="px-2 py-1 text-[11px] uppercase tracking-wider text-faint">Conteneurs de la stack ({up}/{total} actifs)</div>
             {items.length === 0 && <div className="px-2 py-2 text-[13px] text-muted">Chargement…</div>}
             {items.map((c) => {
@@ -743,7 +743,7 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] flex flex-col overflow-hidden">
-      <header className="shrink-0 border-b border-line/70 bg-ink/70 backdrop-blur-xl">
+      <header className="shrink-0 relative z-40 border-b border-line/70 bg-ink/70 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-5 py-2.5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="badge !w-10 !h-10 !rounded-xl">
