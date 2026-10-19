@@ -432,15 +432,23 @@ export default function App() {
 
   // connexion auto (démo)
   useEffect(() => {
-    (async () => {
-      try {
-        const { access_token } = await api('/api/auth/login', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: 'demo', password: 'demo1234' }),
-        })
-        setToken(access_token)
-      } catch { setOffline(true) }
+    let cancelled = false
+    ;(async () => {
+      while (!cancelled) {
+        try {
+          const { access_token } = await api('/api/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: 'demo', password: 'demo1234' }),
+          })
+          if (!cancelled) { setToken(access_token); setOffline(false) }
+          return
+        } catch {
+          setOffline(true)
+          await new Promise((r) => setTimeout(r, 3000))   // le backend démarre peut-être encore
+        }
+      }
     })()
+    return () => { cancelled = true }
   }, [])
 
   const loadPayment = useCallback(async (t) => {
@@ -470,7 +478,7 @@ export default function App() {
   // paiement : après login puis toutes les 5s
   useEffect(() => {
     if (!token) return
-    loadPayment(token); const id = setInterval(() => loadPayment(token), 5000); return () => clearInterval(id)
+    loadPayment(token); const id = setInterval(() => loadPayment(token), 3000); return () => clearInterval(id)
   }, [token, loadPayment])
 
   const onTransfer = async (body) => {

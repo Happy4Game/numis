@@ -50,9 +50,10 @@ services:
     # ports: ["5432:5432"]   # debug uniquement — NE PAS exposer en démo
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
     <<: *json-logging
 
   auth:
@@ -67,9 +68,10 @@ services:
     networks: [rsa-net]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      timeout: 4s
+      retries: 10
+      start_period: 5s
     <<: *json-logging
 
   payment-api:
@@ -89,9 +91,10 @@ services:
       rsa.remediation.managed: "true"   # ce conteneur est pilotable par le moteur de remédiation
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 5s
+      timeout: 4s
+      retries: 6
+      start_period: 8s
     <<: *json-logging
 
   # ---------------------------------------------------------------

@@ -5,8 +5,10 @@ SHELL := /bin/bash
 
 # Cible des attaques (local par défaut ; démo réseau : make attack-dos TARGET=http://192.168.137.1:8080)
 TARGET ?= http://localhost:8080
+DURATION ?= 60
+CONC ?= 50
 
-.PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-sqli attack-all chaos-kill chaos-stop chaos-kill-db traffic train retrain clean
+.PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-ddos attack-sqli attack-all chaos-kill chaos-stop chaos-kill-db traffic train retrain clean
 
 help:            ## Affiche cette aide
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}'
@@ -39,13 +41,16 @@ ps:              ## État des conteneurs
 	docker compose ps
 
 attack-dos:      ## (depuis PC Attaquant) lance le scénario DoS contrôlé
-	python3 attack/scenarios/dos_flood.py --target $(TARGET)
+	python3 attack/scenarios/dos_flood.py --target $(TARGET) --duration $(DURATION) --concurrency $(CONC)
 
 attack-sqli:     ## (depuis PC Attaquant) lance la tentative d'injection SQL
 	python3 attack/scenarios/sqli_probe.py --target $(TARGET)
 
 attack-all:      ## Catalogue complet Red/Blue (hors DoS) + synthèse
 	python3 attack/run_all.py --target $(TARGET)
+
+attack-ddos:     ## DDoS long et intense (5 min, 80 threads) pour éprouver l'escalade
+	python3 attack/scenarios/dos_flood.py --target $(TARGET) --duration 300 --concurrency 80
 
 chaos-kill:      ## (chaos) tue payment-api -> l'IA détecte la panne et REDÉMARRE
 	docker kill rsa-payment-api

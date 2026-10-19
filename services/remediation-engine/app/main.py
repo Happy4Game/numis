@@ -48,7 +48,7 @@ TOKEN = os.environ["REMEDIATION_TOKEN"]
 MANAGED = set(c.strip() for c in os.getenv("MANAGED_CONTAINERS", "").split(",") if c.strip())
 HEALTH_URL = os.getenv("PAYMENT_HEALTH_URL", "http://payment-api:8000/health")
 PAYMENT_ADMIN_URL = os.getenv("PAYMENT_ADMIN_URL", "http://payment-api:8000")
-THROTTLE_RPS = int(os.getenv("THROTTLE_RPS", "20"))
+THROTTLE_RPS = int(os.getenv("THROTTLE_RPS", "10"))
 ALLOWED_ACTIONS = {"restart", "throttle", "auto"}
 
 ACTIONS_TOTAL = Counter("remediation_actions_total", "Actions de remédiation", ["action", "target", "result"])
@@ -197,12 +197,24 @@ def _do_restart(target: str) -> float:
     return _verify_recovery()
 
 
-def _do_throttle() -> float:
+_throttle_state = {"rps": THROTTLE_RPS, "ts": 0.0}
+
+
+def _do_throttle():
+    """Délestage ADAPTATIF : si on a déjà délesté récemment (attaque qui persiste),
+    on resserre le débit autorisé (escalade), jusqu'à un plancher."""
+    now = time.time()
+    if now - _throttle_state["ts"] < 120:
+        _throttle_state["rps"] = max(3, _throttle_state["rps"] // 2)
+    else:
+        _throttle_state["rps"] = THROTTLE_RPS
+    _throttle_state["ts"] = now
+    rps = _throttle_state["rps"]
     with httpx.Client(timeout=5.0) as c:
         c.post(f"{PAYMENT_ADMIN_URL}/admin/protect",
                headers={"x-remediation-token": TOKEN},
-               json={"enabled": True, "rps": THROTTLE_RPS})
-    return _verify_recovery()
+               json={"enabled": True, "rps": rps})
+    return _verify_recovery(), rps
 
 
 @app.on_event("startup")
@@ -267,8 +279,8 @@ def remediate(req: RemediationRequest, x_remediation_token: str = Header(default
             steps.append(f"Exécution : redémarrage du conteneur {target}")
             recovery_s = _do_restart(target)
         elif action == "throttle":
-            steps.append("Exécution : activation du délestage (rate-limit) sur l'API")
-            recovery_s = _do_throttle()
+            recovery_s, rps = _do_throttle()
+            steps.append(f"Exécution : délestage de charge (~{rps} req/s max autorisés sur l'API)")
         else:
             REFUSED_TOTAL.labels("action_not_allowed").inc()
             raise HTTPException(403, f"action non autorisée: {action}")
