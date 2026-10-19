@@ -39,7 +39,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         p = request.url.path
         active = PROTECT["enabled"] and time.time() < PROTECT["until"]
-        if active and p not in ("/health", "/metrics") and not p.startswith("/admin"):
+        # Les endpoints métier légitimes (/accounts lecture, /transactions) ne sont PAS
+        # soumis au compteur global : le délestage ciblé est appliqué dans l'endpoint
+        # transfer() selon la signature d'attaque, pour ne jamais pénaliser un vrai client.
+        if active and p not in ("/health", "/metrics", "/accounts", "/transactions") and not p.startswith("/admin"):
             sec = int(time.time())
             for k in list(_rl_window):
                 if k != sec:
@@ -102,8 +105,16 @@ def accounts(uid: int = Depends(current_user)):
 
 @app.post("/transactions")
 def transfer(body: TransferIn, uid: int = Depends(current_user)):
+    # Délestage CIBLÉ : sous protection, on rejette tôt le motif d'attaque
+    # (auto-virement net-nul, from == to) AVANT toute prise de verrou DB.
+    # Les virements légitimes (from != to) passent et restent disponibles.
+    if body.from_account == body.to_account and PROTECT["enabled"] and time.time() < PROTECT["until"]:
+        raise HTTPException(429, "délestage ciblé : auto-virement rejeté")
     with pool.connection() as conn:
         with conn.transaction():
+            # un virement légitime ne doit jamais rester bloqué sur un verrou
+            # tenu par le flood : il échoue vite (et libère la connexion du pool).
+            conn.execute("SET LOCAL lock_timeout = '600ms'")
             src = conn.execute(
                 "SELECT balance FROM accounts WHERE id=%s AND owner_id=%s FOR UPDATE",
                 (body.from_account, uid),
