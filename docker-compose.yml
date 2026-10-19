@@ -259,6 +259,7 @@ services:
       VITE_PAYMENT_URL: http://localhost:8080
       VITE_GRAFANA_URL: http://localhost:3000
     networks: [rsa-net]
+    depends_on: [auth, payment-api, waf, ml-detector, remediation-engine]
     ports:
       - "3001:80"
     <<: *json-logging
