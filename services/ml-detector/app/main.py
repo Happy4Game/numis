@@ -45,7 +45,8 @@ POLL = int(os.getenv("POLL_INTERVAL_SECONDS", "10"))
 PERSIST = int(os.getenv("ANOMALY_PERSIST_CYCLES", "2"))
 WARMUP_SAMPLES = int(os.getenv("WARMUP_SAMPLES", "20"))
 TARGET_CONTAINER = os.getenv("TARGET_CONTAINER", "rsa-payment-api")
-COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "30"))  # pas de ré-action juste après une reprise
+COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "30"))  # (hérité)
+REARM_MAX = int(os.getenv("REARM_MAX_SECONDS", "120"))  # ré-armement forcé (attaque continue)
 MODEL_PATH = os.getenv("MODEL_PATH", "/model/model.pkl")
 ERR_DEGRADE = float(os.getenv("ERROR_DEGRADE", "0.05"))           # taux de 5xx -> dégradation
 LAT_DEGRADE = float(os.getenv("LATENCY_DEGRADE_SECONDS", "0.3"))  # latence p95 -> dégradation
@@ -71,7 +72,7 @@ state = {"status": "warmup", "samples": 0, "score": None, "flag": 0,
          "warmup_target": WARMUP_SAMPLES, "persist_target": PERSIST,
          "poll_interval": POLL, "baseline": None, "score_history": [],
          "degraded": False, "raw_flag": 0,
-         "reasoning": "Initialisation…", "decisions": [], "history": [], "alive": True}
+         "reasoning": "Initialisation…", "decisions": [], "history": [], "alive": True, "armed": True}
 model = {"clf": None, "mean": None, "std": None}
 
 
@@ -119,19 +120,22 @@ def collect_vector():
 
 
 def explain(vec):
-    """Feature la plus déviante vs normalité (z-score) -> explication lisible."""
+    """Feature la plus déviante vs normalité -> message lisible (sans nombres absurdes)."""
+    std = np.where(model["std"] < 1e-9, 1e-9, model["std"])
     x = np.array([vec[f] for f in FEATURES])
-    z = np.abs((x - model["mean"]) / np.where(model["std"] < 1e-9, 1e-9, model["std"]))
-    i = int(np.argmax(z))
+    i = int(np.argmax(np.abs((x - model["mean"]) / std)))
     f = FEATURES[i]
-    return f"{f} = {vec[f]:.3g} (≈ x{(vec[f]/max(model['mean'][i],1e-6)):.1f} vs normale, z={z[i]:.1f})"
+    base = float(model["mean"][i])
+    fmt = {"request_rate": f"{vec['request_rate']:.1f} req/s",
+           "error_ratio": f"{vec['error_ratio'] * 100:.1f}%",
+           "p95_latency": f"{vec['p95_latency'] * 1000:.0f} ms"}[f]
+    if base > 1e-4:
+        return f"{f} = {fmt} (× {vec[f] / base:.1f} vs normale)"
+    return f"{f} = {fmt} (normale ≈ 0)"
 
 
 def trigger_remediation(reason: str):
     global _last_action_ts
-    if time.time() - _last_action_ts < COOLDOWN:
-        log.info("remédiation en cooldown, on n'agit pas")
-        return
     try:
         r = httpx.post(
             f"{REMEDIATION_URL}/remediate",
@@ -235,16 +239,17 @@ def detection_loop():
                 _decision(f"{label} — {state['explanation']}", "anomaly")
             else:
                 _decision(f"Incident persistant (cycle {state['consecutive']}/{PERSIST})", "anomaly")
-            if state["consecutive"] >= PERSIST:
-                if time.time() - _last_action_ts >= COOLDOWN:
-                    _decision("Seuil atteint → je décide d'engager une remédiation", "decision")
-                    trigger_remediation(state["explanation"])
-                    state["consecutive"] = 0
-                # sinon : une action a déjà été prise récemment (cooldown) — on attend sans ré-agir
+            armed = state["armed"] or (time.time() - _last_action_ts > REARM_MAX)
+            if state["consecutive"] >= PERSIST and armed:
+                _decision("Seuil atteint → je décide d'engager une remédiation", "decision")
+                trigger_remediation(state["explanation"])
+                state["armed"] = False      # désarmé jusqu'au retour à la normale
+                state["consecutive"] = 0
         else:
             state["reasoning"] = f"J'observe le trafic (score {score:.2f}) — conforme au profil appris."
             if was > 0:
                 _decision("Service revenu à la normale, incident clos", "recovered")
+            state["armed"] = True           # ré-armement : prêt pour un vrai nouvel incident
             state["consecutive"] = 0
         time.sleep(POLL)
 
