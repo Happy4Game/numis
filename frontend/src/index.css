@@ -76,6 +76,14 @@
 @keyframes glowpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(242,109,109,0); } 50% { box-shadow: 0 0 30px 4px rgba(242,109,109,.5); } }
 .anim-glow { animation: glowpulse 1s ease-in-out 3; }
 
+/* éclat de paiement (joué une seule fois, au curseur) */
+@keyframes burstRing { 0% { transform: translate(-50%,-50%) scale(.2); opacity:.75 } 100% { transform: translate(-50%,-50%) scale(1); opacity:0 } }
+.burst-ring { position:absolute; left:0; top:0; width:72px; height:72px; border-radius:9999px; border:2px solid #35D6A4; transform: translate(-50%,-50%); animation: burstRing .6s ease-out forwards; }
+@keyframes burstDot { 0% { transform: translate(-50%,-50%); opacity:1 } 100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))); opacity:0 } }
+.burst-dot { position:absolute; left:0; top:0; width:7px; height:7px; border-radius:9999px; transform: translate(-50%,-50%); animation: burstDot .7s cubic-bezier(.22,1,.36,1) forwards; }
+@keyframes burstCoin { 0% { transform: translate(-50%,-50%) scale(.6); opacity:0 } 25% { opacity:1 } 100% { transform: translate(-50%,-160%) scale(1.1); opacity:0 } }
+.burst-coin { position:absolute; left:0; top:0; font-weight:700; color:#35D6A4; font-size:18px; transform: translate(-50%,-50%); animation: burstCoin .8s ease-out forwards; text-shadow:0 2px 10px rgba(53,214,164,.6); }
+
 /* ===== Interactions utilisateur (survol / clic) ===== */
 .card-hover { transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
 .card-hover:hover { transform: translateY(-3px); box-shadow: 0 1px 0 0 rgba(255,255,255,.05) inset, 0 30px 70px -28px rgba(0,0,0,.9); border-color: #3a4a70; }

@@ -8,6 +8,46 @@ async function api(path, opts) {
 }
 const authHeader = (t) => ({ Authorization: `Bearer ${t}` })
 
+/* ---------- carillon de succès (Web Audio, sans fichier) ---------- */
+let _audioCtx = null
+function playChime() {
+  try {
+    _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)()
+    const ctx = _audioCtx
+    if (ctx.state === 'suspended') ctx.resume()
+    const now = ctx.currentTime
+    ;[[880, 0], [1174.66, 0.08], [1567.98, 0.16]].forEach(([f, t]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain()
+      o.type = 'triangle'; o.frequency.value = f
+      o.connect(g); g.connect(ctx.destination)
+      const st = now + t
+      g.gain.setValueAtTime(0.0001, st)
+      g.gain.exponentialRampToValueAtTime(0.2, st + 0.02)
+      g.gain.exponentialRampToValueAtTime(0.0001, st + 0.33)
+      o.start(st); o.stop(st + 0.38)
+    })
+  } catch { /* audio indisponible : on ignore */ }
+}
+
+/* ---------- éclat au curseur lors d'un paiement ---------- */
+function Burst({ at }) {
+  if (!at) return null
+  const parts = Array.from({ length: 10 })
+  return (
+    <div key={at.id} className="fixed z-50 pointer-events-none" style={{ left: at.x, top: at.y }}>
+      <div className="burst-ring" />
+      <div className="burst-coin">€</div>
+      {parts.map((_, i) => {
+        const ang = (i / parts.length) * 2 * Math.PI
+        const dist = 26 + (i % 3) * 10
+        return <span key={i} className="burst-dot"
+          style={{ '--dx': `${Math.cos(ang) * dist}px`, '--dy': `${Math.sin(ang) * dist}px`,
+                   background: i % 2 ? '#35D6A4' : '#7FB0FF' }} />
+      })}
+    </div>
+  )
+}
+
 /* ---------- formatage ---------- */
 const euro = (n) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n)
 const FLOOR = { request_rate: 0.5, error_ratio: 0.01, p95_latency: 0.005 }
@@ -567,6 +607,8 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [slide, setSlide] = useState(1)   // 0 reprise · 1 essentiel · 2 IA
   const flash = useRef(false)
+  const pointer = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+  const [burst, setBurst] = useState(null)
 
   const SLIDES = [
     { id: 'reprise', label: 'Reprise & conteneurs' },
@@ -604,6 +646,12 @@ export default function App() {
       }
     })()
     return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    const onDown = (e) => { pointer.current = { x: e.clientX, y: e.clientY } }
+    window.addEventListener('pointerdown', onDown)
+    return () => window.removeEventListener('pointerdown', onDown)
   }, [])
 
   const loadPayment = useCallback(async (t) => {
@@ -645,6 +693,9 @@ export default function App() {
       })
       setToast({ ok: true, msg: `Paiement #${res.transaction_id} réglé` })
       flash.current = true
+      playChime()
+      setBurst({ x: pointer.current.x, y: pointer.current.y, id: Date.now() })
+      setTimeout(() => setBurst(null), 850)
       await loadPayment(token)
     } catch (e) {
       const s = String(e)
@@ -751,6 +802,8 @@ export default function App() {
           ))}
         </div>
       </nav>
+
+      <Burst at={burst} />
 
       {toast && (
         <div className={`fixed bottom-16 right-5 z-40 px-4 py-3 rounded-xl border text-[14px] shadow-2xl anim-pop ${toast.ok ? 'bg-money/15 border-money/40 text-money' : 'bg-alert/15 border-alert/40 text-alert'}`}>
