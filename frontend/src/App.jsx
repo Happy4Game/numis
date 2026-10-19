@@ -244,7 +244,7 @@ function Ai({ ml }) {
             <span className="font-mono tnum">{ml.samples}/{ml.warmup_target} observations</span>
           </div>
           <div className="h-2 rounded-full bg-ink overflow-hidden">
-            <div className="h-full bg-accent transition-all anim-pulse" style={{ width: pct + '%' }} />
+            <div className="h-full bg-accent transition-all" style={{ width: pct + '%' }} />
           </div>
           <p className="text-[12px] text-muted mt-2">
             ~{Math.max(0, (ml.warmup_target - ml.samples) * (ml.poll_interval || 10))} s restantes au rythme actuel.
@@ -255,7 +255,7 @@ function Ai({ ml }) {
           <div>
             <div className="flex items-center justify-between text-[12px] text-muted mb-1">
               <span>Score d'anomalie <span className="text-muted/70">(sous 0 = anormal)</span></span>
-              <span key={ml.score} className="font-mono tnum text-text anim-pop">{ml.score ?? '—'}</span>
+              <span className="font-mono tnum text-text">{ml.score ?? '—'}</span>
             </div>
             <ScoreChart data={ml.history} />
           </div>
@@ -438,7 +438,7 @@ export default function App() {
       <header className="sticky top-0 z-10 bg-ink/90 backdrop-blur border-b border-line">
         <div className="max-w-6xl mx-auto px-5 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden className="anim-float">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden>
               <circle cx="12" cy="12" r="10" stroke="#5B8DEF" strokeWidth="1.6" />
               <path d="M8 13.5c0 1.4 1.4 2.5 4 2.5s4-.8 4-2.2c0-3-7.5-1.3-7.5-4.3C8.5 8 9.8 7 12 7s4 1 4 2.4" stroke="#35D6A4" strokeWidth="1.6" strokeLinecap="round" />
             </svg>
@@ -448,7 +448,7 @@ export default function App() {
             </div>
           </div>
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-medium ${anomaly ? 'bg-alert/15 text-alert' : 'bg-money/15 text-money'}`}>
-            <span className={`w-2 h-2 rounded-full ${anomaly ? 'bg-alert anim-pulse' : 'bg-money'}`} />
+            <span className={`w-2 h-2 rounded-full ${anomaly ? 'bg-alert' : 'bg-money'}`} />
             {anomaly ? 'Incident en cours' : 'Système sain'}
           </div>
         </div>

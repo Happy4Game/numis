@@ -113,7 +113,8 @@ PROJECT = os.getenv("COMPOSE_PROJECT", "resilience-alpha")
 SELF_NAME = os.getenv("SELF_CONTAINER", "rsa-remediation")
 WATCH_INTERVAL = int(os.getenv("WATCH_INTERVAL_SECONDS", "10"))
 WATCH_COOLDOWN = int(os.getenv("WATCH_COOLDOWN_SECONDS", "60"))
-_watch_last = {}  # nom -> dernier redémarrage (anti-flapping)
+_watch_last = {}   # nom -> dernier redémarrage (anti-flapping)
+_down_count = {}   # nom -> cycles consécutifs observés "morts" (grâce)
 
 
 def _managed_containers():
@@ -124,18 +125,18 @@ def _managed_containers():
         return []
 
 
-def _wait_running(name, timeout_s=30) -> bool:
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
+def _wait_running(name, timeout_s=40):
+    start = time.time()
+    while time.time() - start < timeout_s:
         try:
             c = client.containers.get(name)
             c.reload()
             if c.status == "running":
-                return True
+                return round(time.time() - start, 1)
         except Exception:
             pass
         time.sleep(1.5)
-    return False
+    return None
 
 
 def _watchdog():
@@ -144,20 +145,32 @@ def _watchdog():
         try:
             for c in _managed_containers():
                 name = c.name
-                if name == SELF_NAME or c.status == "running":
+                if name == SELF_NAME:
+                    continue
+                # On ne touche QUE les conteneurs franchement morts (pas les états transitoires
+                # running / created / restarting / paused, pour ne pas gêner un démarrage normal).
+                if c.status not in ("exited", "dead"):
+                    _down_count[name] = 0
+                    continue
+                _down_count[name] = _down_count.get(name, 0) + 1
+                if _down_count[name] < 2:          # grâce : confirmé mort sur 2 cycles (~20s)
                     continue
                 if time.time() - _watch_last.get(name, 0) < WATCH_COOLDOWN:
                     continue
                 _watch_last[name] = time.time()
+                _down_count[name] = 0
                 entry = {"ts": _now().strftime("%Y-%m-%dT%H:%M:%S"), "target": name,
                          "action": "restart", "reason": f"conteneur {c.status}", "source": "watchdog",
                          "result": "pending",
                          "steps": [f"Surveillance : conteneur {name} = {c.status} → redémarrage"]}
                 try:
                     c.restart(timeout=10)
-                    ok = _wait_running(name)
+                    elapsed = _wait_running(name)
+                    ok = elapsed is not None
                     entry["steps"].append(f"Vérification : {name} = {'running' if ok else 'toujours KO'}")
                     entry["result"] = "success" if ok else "unverified"
+                    if ok:
+                        entry["recovery_seconds"] = elapsed
                     ACTIONS_TOTAL.labels("restart", name, entry["result"]).inc()
                 except Exception as e:
                     entry["steps"].append(f"Échec : {e}")
