@@ -464,12 +464,14 @@ export default function App() {
   // supervision (IA + reprise + santé) toutes les 2s
   useEffect(() => {
     const poll = async () => {
-      const [s, acts, mh, rh] = await Promise.allSettled([
+      const [s, acts, mh, rh, cont] = await Promise.allSettled([
         api('/api/ml/state'), api('/api/remediation/actions'),
         api('/api/ml/health'), api('/api/remediation/health'),
+        api('/api/remediation/containers'),
       ])
       if (s.status === 'fulfilled') setMl(s.value)
       if (acts.status === 'fulfilled') setActions(acts.value)
+      if (cont.status === 'fulfilled') setContainers(cont.value)
       setHealth((h) => ({ ...h, ml: mh.status === 'fulfilled', rem: rh.status === 'fulfilled' }))
     }
     poll(); const id = setInterval(poll, 2000); return () => clearInterval(id)
