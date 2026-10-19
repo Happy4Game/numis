@@ -1,0 +1,33 @@
+---
+# Déploiement reproductible de toute la plateforme (sujet §3.2).
+# Prérequis : ansible-galaxy collection install -r requirements.yml
+- name: Déployer RESILIENCE-ALPHA
+  hosts: host
+  vars:
+    project_dir: "{{ playbook_dir }}/../.."
+  tasks:
+    - name: Créer .env depuis l'exemple s'il est absent
+      ansible.builtin.copy:
+        src: "{{ project_dir }}/.env.example"
+        dest: "{{ project_dir }}/.env"
+        force: false
+
+    - name: Construire et démarrer la stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ project_dir }}"
+        build: always
+        state: present
+
+    - name: Attendre que l'API métier soit saine (via le WAF)
+      ansible.builtin.uri:
+        url: "http://localhost:8080/health"
+        status_code: 200
+      register: health
+      retries: 30
+      delay: 5
+      until: health.status == 200
+
+    - name: Transaction témoin (vérifie que le métier fonctionne)
+      ansible.builtin.command:
+        cmd: bash "{{ project_dir }}/tests/smoke_test.sh"
+      changed_when: false

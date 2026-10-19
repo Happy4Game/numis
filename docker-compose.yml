@@ -1,0 +1,264 @@
+# =====================================================================
+#  PROJECT RESILIENCE-ALPHA — Stack complète (SI de paiement fictif +
+#  observabilité + détection ML + remédiation autonome + WAF + RAG)
+#
+#  Principe d'exposition (sujet §4) : on ne publie QUE ce qui doit être
+#  joignable depuis le réseau pédagogique (RESILIENCE-G<n>).
+#    - Exposé  : waf (entrée de l'API), grafana, frontend
+#    - INTERNE : db, auth, remediation-engine, ml-detector, prometheus,
+#                alertmanager, loki, promtail, ollama, rag-assistant
+#  Les ports internes ci-dessous sont commentés "debug" : à n'activer
+#  que ponctuellement, jamais pour la démo réseau.
+# =====================================================================
+
+name: resilience-alpha
+
+x-logging: &json-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+networks:
+  rsa-net:
+    driver: bridge
+
+volumes:
+  db-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  ollama-data:
+
+services:
+  # ---------------------------------------------------------------
+  # 1. SI DE PAIEMENT (métier)
+  # ---------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: rsa-db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./services/payment-api/initdb.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    networks: [rsa-net]
+    # ports: ["5432:5432"]   # debug uniquement — NE PAS exposer en démo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    <<: *json-logging
+
+  auth:
+    build: ./services/auth
+    container_name: rsa-auth
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      DB_DSN: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [rsa-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    <<: *json-logging
+
+  payment-api:
+    build: ./services/payment-api
+    container_name: rsa-payment-api
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      DB_DSN: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      AUTH_URL: http://auth:8000
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db: {condition: service_healthy}
+      auth: {condition: service_healthy}
+    networks: [rsa-net]
+    labels:
+      rsa.remediation.managed: "true"   # ce conteneur est pilotable par le moteur de remédiation
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    <<: *json-logging
+
+  # ---------------------------------------------------------------
+  # 2. DÉFENSE — WAF en frontal de l'API métier
+  # ---------------------------------------------------------------
+  waf:
+    image: owasp/modsecurity-crs:4.7.0-nginx-202410090101
+    container_name: rsa-waf
+    environment:
+      BACKEND: http://payment-api:8000
+      MODSEC_RULE_ENGINE: "On"          # On = blocage ; DetectionOnly = journalisation seule
+      PARANOIA: "1"
+      ANOMALY_INBOUND: "5"
+      ANOMALY_OUTBOUND: "4"
+      MODSEC_AUDIT_LOG: "/var/log/modsec/audit.log"
+      MODSEC_AUDIT_LOG_FORMAT: "JSON"
+      MODSEC_AUDIT_ENGINE: "RelevantOnly"
+    volumes:
+      - ./infra/waf/logs:/var/log/modsec
+    depends_on:
+      payment-api: {condition: service_healthy}
+    networks: [rsa-net]
+    ports:
+      - "8080:8080"      # SEUL point d'entrée public de l'API métier
+    <<: *json-logging
+
+  # ---------------------------------------------------------------
+  # 3. OBSERVABILITÉ + fonction SOC
+  # ---------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: rsa-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=6h
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+      - prometheus-data:/prometheus
+    depends_on: [payment-api]
+    networks: [rsa-net]
+    # ports: ["9090:9090"]  # debug uniquement
+    <<: *json-logging
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: rsa-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./infra/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks: [rsa-net]
+    <<: *json-logging
+
+  loki:
+    image: grafana/loki:3.2.0
+    container_name: rsa-loki
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./infra/loki/config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    networks: [rsa-net]
+    <<: *json-logging
+
+  promtail:
+    image: grafana/promtail:3.2.0
+    container_name: rsa-promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./infra/promtail/config.yml:/etc/promtail/config.yml:ro
+      - ./infra/waf/logs:/var/log/modsec:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # lecture des logs conteneurs
+    depends_on: [loki]
+    networks: [rsa-net]
+    <<: *json-logging
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: rsa-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"        # lecture seule pour le jury pendant la démo
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on: [prometheus, loki]
+    networks: [rsa-net]
+    ports:
+      - "3000:3000"
+    <<: *json-logging
+
+  # ---------------------------------------------------------------
+  # 4. DÉTECTION ML + REMÉDIATION AUTONOME
+  # ---------------------------------------------------------------
+  ml-detector:
+    build: ./services/ml-detector
+    container_name: rsa-ml-detector
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      REMEDIATION_URL: http://remediation-engine:8000
+      REMEDIATION_TOKEN: ${REMEDIATION_TOKEN}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POLL_INTERVAL_SECONDS: "10"
+      ANOMALY_PERSIST_CYCLES: "2"      # anti faux-positif : N cycles consécutifs avant d'agir
+    depends_on: [prometheus]
+    networks: [rsa-net]
+    <<: *json-logging
+
+  remediation-engine:
+    build: ./services/remediation-engine
+    container_name: rsa-remediation
+    environment:
+      REMEDIATION_TOKEN: ${REMEDIATION_TOKEN}
+      # Allowlist STRICTE : seuls ces conteneurs peuvent être actionnés (sujet §3.4 "privilèges maîtrisés")
+      MANAGED_CONTAINERS: "rsa-payment-api"
+      PAYMENT_HEALTH_URL: http://payment-api:8000/health
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # Accès Docker nécessaire pour restart/isolation. Durci via allowlist applicative.
+      # Option de durcissement (voir docs/runbooks/hardening.md) : passer par un
+      # docker-socket-proxy en lecture/écriture restreinte au lieu du socket brut.
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [rsa-net]
+    # ports: ["8010:8000"]  # debug uniquement
+    <<: *json-logging
+
+  # ---------------------------------------------------------------
+  # 5. ASSISTANT LOCAL (RAG) — distinct de la remédiation (sujet §3.3)
+  # ---------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:0.3.14
+    container_name: rsa-ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    networks: [rsa-net]
+    # Décommenter si délestage IA sur 3e PC => retirer ce service et pointer
+    # rag-assistant vers http://<ip-3e-pc>:11434
+    <<: *json-logging
+
+  rag-assistant:
+    build: ./services/rag-assistant
+    container_name: rsa-rag
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      DOCS_PATH: /docs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./docs:/docs:ro        # l'assistant indexe VOS documents (procédures, archi, runbooks)
+    depends_on: [ollama]
+    networks: [rsa-net]
+    ports:
+      - "8001:8000"      # interface opérateurs — exposée sur le LAN du groupe uniquement
+    <<: *json-logging
+
+  # ---------------------------------------------------------------
+  # 6. DASHBOARD de supervision (React/Tailwind)
+  # ---------------------------------------------------------------
+  frontend:
+    build: ./frontend
+    container_name: rsa-frontend
+    environment:
+      # URLs vues par le navigateur du jury (adapter l'IP du PC Hôte : 192.168.137.1)
+      VITE_PAYMENT_URL: http://localhost:8080
+      VITE_GRAFANA_URL: http://localhost:3000
+    networks: [rsa-net]
+    ports:
+      - "3001:80"
+    <<: *json-logging

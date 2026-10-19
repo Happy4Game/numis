@@ -1,0 +1,27 @@
+---
+# Playbook de reprise MANUELLE d'un service (runbook automatisé).
+# Complémentaire du moteur de remédiation autonome : utile si un opérateur doit
+# rejouer une reprise à la demande, ou pour un service hors périmètre de l'automate.
+- name: Reprise manuelle d'un service
+  hosts: host
+  vars:
+    service: payment-api        # surcharge : -e service=auth
+  tasks:
+    - name: Redémarrer le conteneur
+      community.docker.docker_container:
+        name: "rsa-{{ service }}"
+        state: started
+        restart: true
+
+    - name: Vérifier le retour à la santé
+      ansible.builtin.uri:
+        url: "http://localhost:8080/health"
+        status_code: 200
+      register: h
+      retries: 20
+      delay: 3
+      until: h.status == 200
+
+    - name: Résultat
+      ansible.builtin.debug:
+        msg: "Reprise de {{ service }} confirmée (HTTP {{ h.status }})."

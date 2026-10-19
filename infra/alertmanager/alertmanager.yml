@@ -1,0 +1,12 @@
+# Alertmanager : rend les alertes "SOC" visibles (UI + Grafana). Le rôle d'ACTEUR de la
+# reprise est tenu par ml-detector -> remediation-engine, pas par Alertmanager (on évite
+# deux chemins d'action concurrents). Receiver par défaut = regroupement/visualisation.
+route:
+  receiver: default
+  group_by: ["alertname"]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 1h
+
+receivers:
+  - name: default

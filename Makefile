@@ -1,0 +1,45 @@
+# Raccourcis de pilotage de la plateforme RESILIENCE-ALPHA.
+# Usage : make <cible>
+
+SHELL := /bin/bash
+
+.PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-sqli clean
+
+help:            ## Affiche cette aide
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}'
+
+init:            ## Prépare l'environnement (.env depuis l'exemple si absent)
+	@test -f .env || (cp .env.example .env && echo ">> .env créé depuis .env.example — ÉDITEZ les mots de passe !")
+
+up: init         ## Démarre toute la stack
+	docker compose up -d --build
+
+down:            ## Arrête la stack
+	docker compose down
+
+build:           ## (Re)build les images applicatives
+	docker compose build
+
+pull-model:      ## Télécharge le modèle LLM local dans Ollama
+	docker compose exec ollama ollama pull $${OLLAMA_MODEL:-qwen2.5:3b}
+
+seed:            ## (Ré)injecte des transactions fictives de référence
+	docker compose exec payment-api python -m app.seed
+
+smoke:           ## Vérifie que le service métier répond (transaction témoin)
+	@bash tests/smoke_test.sh
+
+logs:            ## Suit les logs de tous les services
+	docker compose logs -f --tail=100
+
+ps:              ## État des conteneurs
+	docker compose ps
+
+attack-dos:      ## (depuis PC Attaquant) lance le scénario DoS contrôlé
+	python attack/scenarios/dos_flood.py --target http://192.168.137.1:8080
+
+attack-sqli:     ## (depuis PC Attaquant) lance la tentative d'injection SQL
+	python attack/scenarios/sqli_probe.py --target http://192.168.137.1:8080
+
+clean:           ## Supprime conteneurs + volumes (reset complet)
+	docker compose down -v

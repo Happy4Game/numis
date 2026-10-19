@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - /etc/prometheus/rules.yml
+
+scrape_configs:
+  # Le nom de job="payment-api" est utilisé par les requêtes PromQL du ml-detector.
+  - job_name: payment-api
+    static_configs: [{ targets: ["payment-api:8000"] }]
+  - job_name: auth
+    static_configs: [{ targets: ["auth:8000"] }]
+  - job_name: remediation-engine
+    static_configs: [{ targets: ["remediation-engine:8000"] }]
+  - job_name: ml-detector
+    static_configs: [{ targets: ["ml-detector:8000"] }]
+  - job_name: prometheus
+    static_configs: [{ targets: ["localhost:9090"] }]

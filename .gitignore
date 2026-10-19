@@ -1,0 +1,29 @@
+# Secrets — jamais en clair dans le dépôt (sujet §7.4 : "Aucun secret en clair")
+.env
+*.key
+age.key
+secrets.dec.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+
+# Données locales / logs
+infra/waf/logs/*.log
+*.log
+data/
+
+# ML artefacts volumineux (régénérables)
+services/ml-detector/model.pkl
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

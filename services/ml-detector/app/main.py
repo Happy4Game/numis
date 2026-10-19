@@ -1,0 +1,172 @@
+"""Détecteur d'anomalies — Isolation Forest sur 3 métriques de payment-api.
+
+Pourquoi ce choix (défendable au jury) :
+  - Isolation Forest = non supervisé (pas besoin d'incidents étiquetés), léger, rapide.
+  - 3 features seulement => EXPLICABLE : à chaque alerte on dit laquelle a dérivé et de combien.
+  - Apprentissage de la "normalité" sur une fenêtre de warmup (trafic nominal), puis scoring.
+  - Anti faux-positif : il faut N cycles consécutifs anormaux avant de déclencher la reprise.
+
+Chaîne : Prometheus --(query)--> ce service --(si anomalie persistante)--> remediation-engine.
+"""
+import os
+import threading
+import time
+import logging, json, sys
+
+import httpx
+import numpy as np
+from fastapi import FastAPI
+from prometheus_client import Gauge, generate_latest, CONTENT_TYPE_LATEST
+from sklearn.ensemble import IsolationForest
+from starlette.responses import Response
+
+SERVICE = "ml-detector"
+_h = logging.StreamHandler(sys.stdout)
+class _F(logging.Formatter):
+    def format(self, r):
+        p = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(r.created)),
+             "level": r.levelname, "service": SERVICE, "msg": r.getMessage()}
+        if hasattr(r, "extra_fields"): p.update(r.extra_fields)
+        return json.dumps(p, ensure_ascii=False)
+_h.setFormatter(_F())
+logging.getLogger().handlers = [_h]
+logging.getLogger().setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
+log = logging.getLogger(SERVICE)
+
+PROM = os.getenv("PROMETHEUS_URL", "http://prometheus:9090")
+REMEDIATION_URL = os.getenv("REMEDIATION_URL", "http://remediation-engine:8000")
+REMEDIATION_TOKEN = os.environ["REMEDIATION_TOKEN"]
+POLL = int(os.getenv("POLL_INTERVAL_SECONDS", "10"))
+PERSIST = int(os.getenv("ANOMALY_PERSIST_CYCLES", "2"))
+WARMUP_SAMPLES = int(os.getenv("WARMUP_SAMPLES", "20"))
+TARGET_CONTAINER = os.getenv("TARGET_CONTAINER", "rsa-payment-api")
+COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "90"))  # pas de ré-action juste après une reprise
+
+FEATURES = ["request_rate", "error_ratio", "p95_latency"]
+QUERIES = {
+    "request_rate": 'sum(rate(http_requests_total{job="payment-api"}[1m]))',
+    "error_ratio": '(sum(rate(http_requests_total{job="payment-api",status=~"5.."}[1m])) '
+                   '/ clamp_min(sum(rate(http_requests_total{job="payment-api"}[1m])), 0.001))',
+    "p95_latency": 'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="payment-api"}[1m])) by (le))',
+}
+
+# Métriques exposées (le dashboard et Grafana les lisent)
+G_SCORE = Gauge("ml_anomaly_score", "Score d'anomalie (plus bas = plus anormal)")
+G_FLAG = Gauge("ml_anomaly_flag", "1 si anomalie détectée ce cycle")
+G_FEATURE = Gauge("ml_feature_value", "Valeur courante des features", ["feature"])
+
+app = FastAPI(title="RSA ML Detector")
+
+state = {"status": "warmup", "samples": 0, "score": None, "flag": 0,
+         "features": {}, "explanation": "", "last_action": None, "consecutive": 0}
+model = {"clf": None, "mean": None, "std": None}
+_last_action_ts = 0.0
+
+
+def query_prom(expr: str):
+    try:
+        r = httpx.get(f"{PROM}/api/v1/query", params={"query": expr}, timeout=4.0)
+        data = r.json()["data"]["result"]
+        if not data:
+            return 0.0
+        v = float(data[0]["value"][1])
+        return 0.0 if (np.isnan(v) or np.isinf(v)) else v
+    except Exception as e:
+        log.warning("requête Prometheus échouée", extra={"extra_fields": {"err": str(e)}})
+        return 0.0
+
+
+def collect_vector():
+    vals = {f: query_prom(QUERIES[f]) for f in FEATURES}
+    for f, v in vals.items():
+        G_FEATURE.labels(f).set(v)
+    return vals
+
+
+def explain(vec):
+    """Feature la plus déviante vs normalité (z-score) -> explication lisible."""
+    x = np.array([vec[f] for f in FEATURES])
+    z = np.abs((x - model["mean"]) / np.where(model["std"] < 1e-9, 1e-9, model["std"]))
+    i = int(np.argmax(z))
+    f = FEATURES[i]
+    return f"{f} = {vec[f]:.3g} (≈ x{(vec[f]/max(model['mean'][i],1e-6)):.1f} vs normale, z={z[i]:.1f})"
+
+
+def trigger_remediation(reason: str):
+    global _last_action_ts
+    if time.time() - _last_action_ts < COOLDOWN:
+        log.info("remédiation en cooldown, on n'agit pas")
+        return
+    try:
+        r = httpx.post(
+            f"{REMEDIATION_URL}/remediate",
+            headers={"x-remediation-token": REMEDIATION_TOKEN},
+            json={"target": TARGET_CONTAINER, "action": "restart", "reason": reason, "source": SERVICE},
+            timeout=75.0,
+        )
+        _last_action_ts = time.time()
+        state["last_action"] = {"ts": time.strftime("%H:%M:%S"), "reason": reason,
+                                "result": r.json().get("result", r.status_code)}
+        log.info("remédiation déclenchée", extra={"extra_fields": {"reason": reason, "http": r.status_code}})
+    except Exception as e:
+        log.error("échec appel remédiation", extra={"extra_fields": {"err": str(e)}})
+
+
+def detection_loop():
+    train = []
+    # --- Phase 1 : warmup (apprentissage de la normalité) ---
+    while len(train) < WARMUP_SAMPLES:
+        vec = collect_vector()
+        train.append([vec[f] for f in FEATURES])
+        state.update(samples=len(train), features=vec)
+        time.sleep(POLL)
+    X = np.array(train)
+    model["mean"], model["std"] = X.mean(axis=0), X.std(axis=0)
+    clf = IsolationForest(n_estimators=100, contamination=0.1, random_state=42)
+    clf.fit(X)
+    model["clf"] = clf
+    state["status"] = "monitoring"
+    log.info("warmup terminé, passage en surveillance",
+             extra={"extra_fields": {"mean": model["mean"].tolist()}})
+
+    # --- Phase 2 : surveillance ---
+    while True:
+        vec = collect_vector()
+        x = np.array([[vec[f] for f in FEATURES]])
+        score = float(clf.decision_function(x)[0])   # <0 => anormal
+        is_anom = int(clf.predict(x)[0] == -1)
+        G_SCORE.set(score); G_FLAG.set(is_anom)
+        state.update(features=vec, score=round(score, 4), flag=is_anom)
+
+        if is_anom:
+            state["consecutive"] += 1
+            state["explanation"] = explain(vec)
+            log.info("cycle anormal", extra={"extra_fields": {
+                "consecutive": state["consecutive"], "score": score, "why": state["explanation"]}})
+            if state["consecutive"] >= PERSIST:
+                trigger_remediation(state["explanation"])
+                state["consecutive"] = 0
+        else:
+            state["consecutive"] = 0
+        time.sleep(POLL)
+
+
+@app.on_event("startup")
+def _start():
+    threading.Thread(target=detection_loop, daemon=True).start()
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "phase": state["status"]}
+
+
+@app.get("/state")
+def get_state():
+    """Consommé par le dashboard de supervision."""
+    return state
+
+
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

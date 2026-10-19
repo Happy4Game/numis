@@ -1,0 +1,58 @@
+{
+  "uid": "rsa-overview",
+  "title": "RESILIENCE-ALPHA — Vue d'ensemble",
+  "tags": ["resilience-alpha"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Anomalie ML (0=sain, 1=anomalie)",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+      "targets": [ { "expr": "ml_anomaly_flag", "refId": "A" } ]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Actions de remédiation (total)",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "sum(remediation_actions_total)", "refId": "A" } ]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Dernière reprise vérifiée (s)",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "remediation_last_recovery_seconds", "refId": "A" } ]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Débit requêtes (req/s)",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "sum(rate(http_requests_total{job=\"payment-api\"}[1m]))", "refId": "A" } ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Taux d'erreur 5xx (payment-api)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "targets": [ { "expr": "sum(rate(http_requests_total{job=\"payment-api\",status=~\"5..\"}[1m])) / clamp_min(sum(rate(http_requests_total{job=\"payment-api\"}[1m])),0.001)", "refId": "A" } ]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Latence p95 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"payment-api\"}[1m])) by (le))", "refId": "A" } ]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Score d'anomalie ML (<0 = anormal)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "ml_anomaly_score", "refId": "A" } ]
+    }
+  ]
+}

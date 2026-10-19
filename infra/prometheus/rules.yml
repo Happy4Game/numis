@@ -1,0 +1,28 @@
+groups:
+  - name: payment-api-slo
+    rules:
+      # Règles "SOC" lisibles par un humain (via Alertmanager/Grafana), en complément
+      # de la détection ML. Elles illustrent la détection par métriques (sujet §3.3).
+      - alert: HighErrorRate
+        expr: >
+          (sum(rate(http_requests_total{job="payment-api",status=~"5.."}[1m]))
+           / clamp_min(sum(rate(http_requests_total{job="payment-api"}[1m])), 0.001)) > 0.2
+        for: 30s
+        labels: { severity: critical }
+        annotations:
+          summary: "Taux d'erreur 5xx > 20% sur payment-api"
+
+      - alert: HighLatencyP95
+        expr: >
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="payment-api"}[1m])) by (le)) > 1
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "Latence p95 > 1s sur payment-api"
+
+      - alert: MLAnomalyDetected
+        expr: ml_anomaly_flag == 1
+        for: 20s
+        labels: { severity: warning }
+        annotations:
+          summary: "Le détecteur ML signale une anomalie persistante"

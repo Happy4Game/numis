@@ -1,0 +1,17 @@
+# Configuration SOPS (gestion des secrets — sujet §3.4).
+# On chiffre les secrets avec age : pas de serveur à faire tourner (choix RAM 16 Go).
+#
+# Mise en place (une fois) :
+#   1) age-keygen -o age.key           # génère la clé (age.key reste HORS dépôt)
+#   2) récupérer la clé publique (ligne "# public key: age1....")
+#   3) coller cette clé publique dans "age:" ci-dessous
+#   4) sops --encrypt --input-type dotenv --output-type dotenv .env > secrets.enc.env
+#
+# Déchiffrement au déploiement :
+#   SOPS_AGE_KEY_FILE=age.key sops --decrypt secrets.enc.env > .env
+#
+# => Seul secrets.enc.env (chiffré) est commité ; .env et age.key ne le sont jamais.
+
+creation_rules:
+  - path_regex: secrets\.enc\.env$
+    age: "age1REMPLACER_PAR_VOTRE_CLE_PUBLIQUE_AGE"
