@@ -44,6 +44,7 @@ COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "90"))  # pas de ré-action juste a
 MODEL_PATH = os.getenv("MODEL_PATH", "/model/model.pkl")
 ERR_DEGRADE = float(os.getenv("ERROR_DEGRADE", "0.05"))           # taux de 5xx -> dégradation
 LAT_DEGRADE = float(os.getenv("LATENCY_DEGRADE_SECONDS", "0.3"))  # latence p95 -> dégradation
+HEALTH_URL = os.getenv("PAYMENT_HEALTH_URL", "http://payment-api:8000/health")
 
 FEATURES = ["request_rate", "error_ratio", "p95_latency"]
 QUERIES = {
@@ -65,7 +66,7 @@ state = {"status": "warmup", "samples": 0, "score": None, "flag": 0,
          "warmup_target": WARMUP_SAMPLES, "persist_target": PERSIST,
          "poll_interval": POLL, "baseline": None, "score_history": [],
          "degraded": False, "raw_flag": 0,
-         "reasoning": "Initialisation…", "decisions": []}
+         "reasoning": "Initialisation…", "decisions": [], "history": [], "alive": True}
 model = {"clf": None, "mean": None, "std": None}
 
 
@@ -81,6 +82,14 @@ def _decision(text, kind="info"):
     state["decisions"].insert(0, {"ts": time.strftime("%H:%M:%S"), "kind": kind, "text": text})
     del state["decisions"][15:]
     log.info(text, extra={"extra_fields": {"decision": kind}})
+
+
+def _alive():
+    """Vivacité du service de paiement (détecte une panne que les métriques ne montrent pas)."""
+    try:
+        return httpx.get(HEALTH_URL, timeout=2.0).status_code == 200
+    except Exception:
+        return False
 _last_action_ts = 0.0
 
 
@@ -186,29 +195,41 @@ def detection_loop():
     # --- Surveillance continue ---
     clf = model["clf"]
     while True:
+        alive = _alive()
         vec = collect_vector()
         x = _scale(np.array([[vec[f] for f in FEATURES]]))
         score = float(clf.decision_function(x)[0])   # <0 => anormal
         is_anom = int(clf.predict(x)[0] == -1)
-        # Une anomalie statistique n'est un INCIDENT que si le service est réellement dégradé
-        # (erreurs ou latence). Un simple creux de trafic ne déclenche donc rien.
+        # Dégradation réelle (erreurs/latence) : une anomalie statistique seule ne suffit pas.
         degraded = (vec["error_ratio"] > ERR_DEGRADE) or (vec["p95_latency"] > LAT_DEGRADE)
-        effective = is_anom and degraded
-        G_SCORE.set(score); G_FLAG.set(effective)
-        hist = state["score_history"]; hist.append(round(score, 4))
-        del hist[:-40]  # ne garde que les 40 derniers points
-        state.update(features=vec, score=round(score, 4), flag=effective,
-                     raw_flag=is_anom, degraded=degraded)
+        # Incident = anomalie dégradée OU service injoignable (panne).
+        incident = (is_anom and degraded) or (not alive)
+        flag = 1 if incident else 0
+
+        G_SCORE.set(score); G_FLAG.set(flag)
+        snap = {"ts": time.strftime("%H:%M:%S"), "score": round(score, 4),
+                "request_rate": round(vec["request_rate"], 2),
+                "error_ratio": round(vec["error_ratio"], 4),
+                "p95_latency": round(vec["p95_latency"], 4),
+                "alive": alive, "flag": flag}
+        state["history"].append(snap); del state["history"][:-60]
+        hist = state["score_history"]; hist.append(round(score, 4)); del hist[:-40]
+        state.update(features=vec, score=round(score, 4), flag=flag,
+                     raw_flag=is_anom, degraded=degraded, alive=alive)
 
         was = state["consecutive"]
-        if effective:
-            state["explanation"] = explain(vec)
+        if incident:
+            if not alive:
+                state["explanation"] = "Service injoignable (/health KO)"
+            else:
+                state["explanation"] = explain(vec)
             state["reasoning"] = f"Incident en cours : {state['explanation']}"
             state["consecutive"] += 1
             if was == 0:
-                _decision(f"Anomalie détectée — {state['explanation']}", "anomaly")
+                label = "Service injoignable" if not alive else "Anomalie détectée"
+                _decision(f"{label} — {state['explanation']}", "anomaly")
             else:
-                _decision(f"Anomalie persistante (cycle {state['consecutive']}/{PERSIST})", "anomaly")
+                _decision(f"Incident persistant (cycle {state['consecutive']}/{PERSIST})", "anomaly")
             if state["consecutive"] >= PERSIST:
                 _decision("Seuil atteint → je décide d'engager une remédiation", "decision")
                 trigger_remediation(state["explanation"])
@@ -216,7 +237,7 @@ def detection_loop():
         else:
             state["reasoning"] = f"J'observe le trafic (score {score:.2f}) — conforme au profil appris."
             if was > 0:
-                _decision("Trafic revenu à la normale, incident clos", "recovered")
+                _decision("Service revenu à la normale, incident clos", "recovered")
             state["consecutive"] = 0
         time.sleep(POLL)
 

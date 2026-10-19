@@ -6,7 +6,7 @@ SHELL := /bin/bash
 # Cible des attaques (local par défaut ; démo réseau : make attack-dos TARGET=http://192.168.137.1:8080)
 TARGET ?= http://localhost:8080
 
-.PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-sqli attack-all traffic train retrain clean
+.PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-sqli attack-all chaos-kill chaos-stop traffic train retrain clean
 
 help:            ## Affiche cette aide
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}'
@@ -46,6 +46,12 @@ attack-sqli:     ## (depuis PC Attaquant) lance la tentative d'injection SQL
 
 attack-all:      ## Catalogue complet Red/Blue (hors DoS) + synthèse
 	python3 attack/run_all.py --target $(TARGET)
+
+chaos-kill:      ## (chaos) tue payment-api -> l'IA détecte la panne et REDÉMARRE
+	docker kill rsa-payment-api
+
+chaos-stop:      ## (chaos) arrête payment-api (panne) -> reprise auto par redémarrage
+	docker stop rsa-payment-api
 
 clean:           ## Supprime conteneurs + volumes (reset complet)
 	docker compose down -v

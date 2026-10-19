@@ -6,6 +6,7 @@
 | # | Attaque (Red) | Catégorie | Signal / détection (SOC) | Défense (Blue) | Réponse |
 |---|---------------|-----------|--------------------------|----------------|---------|
 | 1 | DoS (contention DB) | Disponibilité | latence p95 ↑, 5xx ↑ (Prometheus) → **détecteur ML** | pool borné, moteur de remédiation | **délestage** auto (429) + vérif santé |
+| 1b | Panne de service (chaos / kill) | Disponibilité | **vivacité `/health` KO** (détecteur) | moteur de remédiation | **redémarrage** auto + vérif santé |
 | 2 | Injection SQL | Compromission | logs WAF `job=modsec` (Loki) | **WAF** CRS + requêtes paramétrées | **blocage** 403 (pas de restauration) |
 | 3 | XSS | Compromission | logs WAF (Loki) | **WAF** CRS | blocage 403 |
 | 4 | Traversée de répertoire / LFI | Compromission | logs WAF (Loki) | **WAF** CRS | blocage 403 |
@@ -28,3 +29,13 @@ Cette distinction est explicitement valorisée par le sujet (§2, §3.4).
 - **Par métriques** (Prometheus → détecteur ML + règles d'alerte) : disponibilité, brute-force, scan.
 - **Par journaux** (WAF + services → Promtail → Loki → Grafana) : injections, XSS, traversée,
   accès refusés — consultables et corrélables (fonction SOC).
+
+## Chaos engineering (injection de défaillances — sprint du jeudi)
+
+On ne fait pas que subir des attaques : on **provoque** des pannes pour prouver la reprise.
+```bash
+make chaos-kill     # tue payment-api -> détecteur voit /health KO -> moteur REDÉMARRE -> vérifie
+make chaos-stop     # même chose via un arrêt propre
+```
+Cas d'usage distinct du DoS : ici le service est **mort** (pas saturé), donc la bonne action est
+le **redémarrage**, pas le délestage. Le playbook du moteur choisit automatiquement la bonne réponse.

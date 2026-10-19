@@ -40,19 +40,54 @@ function Pill({ children, color }) {
   return <span className={`px-2 py-0.5 rounded-full text-[12px] font-medium ${c}`}>{children}</span>
 }
 
-/* ---------- courbe du score ---------- */
-function Sparkline({ data }) {
-  if (!data || data.length < 2) return <div className="h-12 flex items-center text-[12px] text-muted">pas encore de points…</div>
-  const min = Math.min(...data, 0), max = Math.max(...data, 0)
-  const span = max - min || 1
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${30 - ((v - min) / span) * 30}`).join(' ')
-  const zeroY = 30 - ((0 - min) / span) * 30
-  const anom = data[data.length - 1] < 0
+/* ---------- courbe du score (interactive) ---------- */
+function ScoreChart({ data }) {
+  const [idx, setIdx] = useState(null)
+  const ref = useRef(null)
+  if (!data || data.length < 2)
+    return <div className="h-28 flex items-center text-[12px] text-muted">en attente de points...</div>
+  const n = data.length
+  const scores = data.map((d) => d.score)
+  const min = Math.min(...scores, 0), max = Math.max(...scores, 0)
+  const span = (max - min) || 1
+  const X = (i) => (i / (n - 1)) * 100
+  const Yv = (v) => 28 - ((v - min) / span) * 26 + 1
+  const pts = data.map((d, i) => `${X(i)},${Yv(d.score)}`).join(' ')
+  const zeroY = Yv(0)
+  const onMove = (e) => {
+    const r = ref.current.getBoundingClientRect()
+    const rel = (e.clientX - r.left) / r.width
+    setIdx(Math.max(0, Math.min(n - 1, Math.round(rel * (n - 1)))))
+  }
+  const hv = idx != null ? data[idx] : null
   return (
-    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-12">
-      <line x1="0" y1={zeroY} x2="100" y2={zeroY} stroke="#27324F" strokeWidth="0.5" strokeDasharray="2 2" />
-      <polyline points={pts} fill="none" stroke={anom ? '#F26D6D' : '#35D6A4'} strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
-    </svg>
+    <div ref={ref} className="relative h-28 select-none cursor-crosshair"
+         onMouseMove={onMove} onMouseLeave={() => setIdx(null)}>
+      <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+        <line x1="0" y1={zeroY} x2="100" y2={zeroY} stroke="#27324F" strokeWidth="0.4" strokeDasharray="2 2" />
+        <polyline points={pts} fill="none" stroke="#5B8DEF" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+      </svg>
+      {hv && (
+        <>
+          <div className="absolute top-0 bottom-0 w-px bg-muted/40" style={{ left: `${X(idx)}%` }} />
+          <div className={`absolute w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2 ${hv.flag ? 'bg-alert' : 'bg-accent'}`}
+               style={{ left: `${X(idx)}%`, top: `${(Yv(hv.score) / 30) * 100}%` }} />
+          <div className="absolute z-10 -translate-x-1/2 -translate-y-full pointer-events-none"
+               style={{ left: `${Math.min(84, Math.max(16, X(idx)))}%`, top: `${(Yv(hv.score) / 30) * 100}%` }}>
+            <div className="mb-1 bg-ink border border-line rounded-lg px-2.5 py-1.5 text-[11px] whitespace-nowrap shadow-lg">
+              <div className="font-mono tnum text-muted/80">{hv.ts}</div>
+              <div>score <span className="font-mono tnum text-text">{hv.score}</span>{' '}
+                {hv.alive === false ? <span className="text-alert">service KO</span>
+                  : hv.flag ? <span className="text-alert">anomalie</span>
+                  : <span className="text-money">sain</span>}</div>
+              <div className="text-muted">débit <span className="font-mono tnum text-text">{hv.request_rate}</span> · err{' '}
+                <span className="font-mono tnum text-text">{(hv.error_ratio * 100).toFixed(1)}%</span> · p95{' '}
+                <span className="font-mono tnum text-text">{(hv.p95_latency * 1000).toFixed(0)}ms</span></div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -221,7 +256,7 @@ function Ai({ ml }) {
               <span>Score d'anomalie <span className="text-muted/70">(sous 0 = anormal)</span></span>
               <span className="font-mono tnum text-text">{ml.score ?? '—'}</span>
             </div>
-            <Sparkline data={ml.score_history} />
+            <ScoreChart data={ml.history} />
           </div>
 
           <div className="space-y-2">

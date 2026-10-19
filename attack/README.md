@@ -10,6 +10,8 @@ make attack-all                 # catalogue complet (hors DoS) + tableau de rés
 ## Disponibilité (on restaure)
 ```bash
 make attack-dos                 # DoS par contention DB -> détection ML -> délestage auto
+make chaos-kill                 # (chaos) panne de service -> détection vivacité -> redémarrage auto
+make chaos-stop                 # (chaos) arrêt du service -> reprise auto
 ```
 
 ## Compromission / reconnaissance (on bloque / contient)
