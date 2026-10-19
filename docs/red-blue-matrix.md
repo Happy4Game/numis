@@ -7,6 +7,7 @@
 |---|---------------|-----------|--------------------------|----------------|---------|
 | 1 | DoS (contention DB) | Disponibilité | latence p95 ↑, 5xx ↑ (Prometheus) → **détecteur ML** | pool borné, moteur de remédiation | **délestage** auto (429) + vérif santé |
 | 1b | Panne de service (chaos / kill) | Disponibilité | **vivacité `/health` KO** (détecteur) | moteur de remédiation | **redémarrage** auto + vérif santé |
+| 1c | Panne d'une dépendance (db tuée) | Disponibilité | `/health` KO (503) + statut conteneur | diagnostic dépendances | **redémarrage de la db** (pas de l'API) + vérif |
 | 2 | Injection SQL | Compromission | logs WAF `job=modsec` (Loki) | **WAF** CRS + requêtes paramétrées | **blocage** 403 (pas de restauration) |
 | 3 | XSS | Compromission | logs WAF (Loki) | **WAF** CRS | blocage 403 |
 | 4 | Traversée de répertoire / LFI | Compromission | logs WAF (Loki) | **WAF** CRS | blocage 403 |

@@ -6,7 +6,7 @@ SHELL := /bin/bash
 # Cible des attaques (local par défaut ; démo réseau : make attack-dos TARGET=http://192.168.137.1:8080)
 TARGET ?= http://localhost:8080
 
-.PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-sqli attack-all chaos-kill chaos-stop traffic train retrain clean
+.PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-sqli attack-all chaos-kill chaos-stop chaos-kill-db traffic train retrain clean
 
 help:            ## Affiche cette aide
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}'
@@ -52,6 +52,9 @@ chaos-kill:      ## (chaos) tue payment-api -> l'IA détecte la panne et REDÉMA
 
 chaos-stop:      ## (chaos) arrête payment-api (panne) -> reprise auto par redémarrage
 	docker stop rsa-payment-api
+
+chaos-kill-db:   ## (chaos) tue la base -> l'IA diagnostique la dépendance et redémarre la db
+	docker kill rsa-db
 
 clean:           ## Supprime conteneurs + volumes (reset complet)
 	docker compose down -v

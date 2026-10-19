@@ -11,7 +11,9 @@ Chaîne : Prometheus --(query)--> ce service --(si anomalie persistante)--> reme
 import os
 import threading
 import time
+import datetime
 import logging, json, sys
+from zoneinfo import ZoneInfo
 
 import httpx
 import numpy as np
@@ -32,6 +34,9 @@ _h.setFormatter(_F())
 logging.getLogger().handlers = [_h]
 logging.getLogger().setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
 log = logging.getLogger(SERVICE)
+_TZ = ZoneInfo(os.getenv("TZ", "Europe/Paris"))
+def _now():
+    return datetime.datetime.now(_TZ)
 
 PROM = os.getenv("PROMETHEUS_URL", "http://prometheus:9090")
 REMEDIATION_URL = os.getenv("REMEDIATION_URL", "http://remediation-engine:8000")
@@ -79,7 +84,7 @@ def _scale(x):
 
 def _decision(text, kind="info"):
     """Journalise une étape de décision (visible dans le dashboard)."""
-    state["decisions"].insert(0, {"ts": time.strftime("%H:%M:%S"), "kind": kind, "text": text})
+    state["decisions"].insert(0, {"ts": _now().strftime("%H:%M:%S"), "kind": kind, "text": text})
     del state["decisions"][15:]
     log.info(text, extra={"extra_fields": {"decision": kind}})
 
@@ -136,7 +141,7 @@ def trigger_remediation(reason: str):
         )
         _last_action_ts = time.time()
         res = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
-        state["last_action"] = {"ts": time.strftime("%H:%M:%S"), "reason": reason,
+        state["last_action"] = {"ts": _now().strftime("%H:%M:%S"), "reason": reason,
                                 "result": res.get("result", r.status_code)}
         _decision(f"Remédiation « {res.get('action', '?')} » → {res.get('result', '?')} "
                   f"(rétabli en {res.get('recovery_seconds', '?')}s)", "action")
@@ -207,7 +212,7 @@ def detection_loop():
         flag = 1 if incident else 0
 
         G_SCORE.set(score); G_FLAG.set(flag)
-        snap = {"ts": time.strftime("%H:%M:%S"), "score": round(score, 4),
+        snap = {"ts": _now().strftime("%H:%M:%S"), "score": round(score, 4),
                 "request_rate": round(vec["request_rate"], 2),
                 "error_ratio": round(vec["error_ratio"], 4),
                 "p95_latency": round(vec["p95_latency"], 4),

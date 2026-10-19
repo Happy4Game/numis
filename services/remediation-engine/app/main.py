@@ -12,7 +12,9 @@ MODÈLE DE PRIVILÈGES (sujet §3.4 — "privilèges maîtrisés", point noté) 
 """
 import os
 import time
+import datetime
 from collections import deque
+from zoneinfo import ZoneInfo
 
 import docker
 import httpx
@@ -37,6 +39,9 @@ _h.setFormatter(_F())
 logging.getLogger().handlers = [_h]
 logging.getLogger().setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
 log = logging.getLogger(SERVICE)
+_TZ = ZoneInfo(os.getenv("TZ", "Europe/Paris"))
+def _now():
+    return datetime.datetime.now(_TZ)
 
 TOKEN = os.environ["REMEDIATION_TOKEN"]
 MANAGED = set(c.strip() for c in os.getenv("MANAGED_CONTAINERS", "").split(",") if c.strip())
@@ -92,6 +97,16 @@ def _service_up() -> bool:
         return False
 
 
+def _container_down(name: str) -> bool:
+    """Vrai si le conteneur n'est pas en cours d'exécution (arrêté / tué / absent)."""
+    try:
+        return client.containers.get(name).status != "running"
+    except docker.errors.NotFound:
+        return True
+    except Exception:
+        return False
+
+
 def _decide() -> str:
     """Playbook : service injoignable => conteneur planté => restart.
     Service vivant mais dégradé (flood) => délestage de charge."""
@@ -138,24 +153,32 @@ def remediate(req: RemediationRequest, x_remediation_token: str = Header(default
     requested = req.action if req.action in ALLOWED_ACTIONS else "auto"
     steps = []
     if requested == "auto":
-        up = _service_up()
-        action = "throttle" if up else "restart"
-        steps.append("Diagnostic : service "
-                     + ("vivant mais saturé" if up else "injoignable (planté)")
-                     + f" → action retenue : {action}")
+        # Diagnostic conscient des dépendances : on identifie QUEL composant est tombé.
+        if _container_down("rsa-payment-api"):
+            action, target = "restart", "rsa-payment-api"
+            steps.append("Diagnostic : conteneur payment-api arrêté → redémarrage")
+        elif _container_down("rsa-db"):
+            action, target = "restart", "rsa-db"
+            steps.append("Diagnostic : dépendance 'base de données' arrêtée → redémarrage de la db")
+        elif _service_up():
+            action, target = "throttle", "rsa-payment-api"
+            steps.append("Diagnostic : service vivant mais saturé → délestage")
+        else:
+            action, target = "restart", "rsa-payment-api"
+            steps.append("Diagnostic : service injoignable → redémarrage de payment-api")
     else:
-        action = requested
+        action, target = requested, req.target
         steps.append(f"Action imposée : {action}")
 
-    entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-             "target": req.target, "action": action, "reason": req.reason,
+    entry = {"ts": _now().strftime("%Y-%m-%dT%H:%M:%S"),
+             "target": target, "action": action, "reason": req.reason,
              "source": req.source, "result": "pending", "steps": steps}
     log.info("remédiation engagée", extra={"extra_fields": entry})
 
     try:
         if action == "restart":
-            steps.append(f"Exécution : redémarrage du conteneur {req.target}")
-            recovery_s = _do_restart(req.target)
+            steps.append(f"Exécution : redémarrage du conteneur {target}")
+            recovery_s = _do_restart(target)
         elif action == "throttle":
             steps.append("Exécution : activation du délestage (rate-limit) sur l'API")
             recovery_s = _do_throttle()
@@ -164,20 +187,20 @@ def remediate(req: RemediationRequest, x_remediation_token: str = Header(default
             raise HTTPException(403, f"action non autorisée: {action}")
         steps.append(f"Vérification : service rétabli en {round(recovery_s, 1)}s")
         LAST_RECOVERY.set(recovery_s)
-        ACTIONS_TOTAL.labels(action, req.target, "success").inc()
+        ACTIONS_TOTAL.labels(action, target, "success").inc()
         entry.update(result="success", recovery_seconds=round(recovery_s, 1))
         log.info("reprise vérifiée", extra={"extra_fields": entry})
     except HTTPException:
         steps.append("Vérification : reprise non confirmée dans le délai")
-        ACTIONS_TOTAL.labels(action, req.target, "unverified").inc()
+        ACTIONS_TOTAL.labels(action, target, "unverified").inc()
         entry.update(result="unverified")
         history.appendleft(entry)
         raise
     except docker.errors.NotFound:
-        ACTIONS_TOTAL.labels(action, req.target, "not_found").inc()
+        ACTIONS_TOTAL.labels(action, target, "not_found").inc()
         entry.update(result="not_found")
         history.appendleft(entry)
-        raise HTTPException(404, f"conteneur introuvable: {req.target}")
+        raise HTTPException(404, f"conteneur introuvable: {target}")
 
     history.appendleft(entry)
     return entry
