@@ -23,6 +23,9 @@ x-logging: &json-logging
 networks:
   rsa-net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
 
 volumes:
   db-data:
@@ -86,7 +89,9 @@ services:
     depends_on:
       db: {condition: service_healthy}
       auth: {condition: service_healthy}
-    networks: [rsa-net]
+    networks:
+      rsa-net:
+        ipv4_address: 172.29.0.10
     labels:
       rsa.remediation.managed: "true"   # ce conteneur est pilotable par le moteur de remédiation
     healthcheck:
