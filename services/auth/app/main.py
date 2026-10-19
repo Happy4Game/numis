@@ -22,6 +22,12 @@ log = setup_logging(SERVICE, os.getenv("LOG_LEVEL", "INFO"))
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_TTL = int(os.getenv("JWT_TTL_SECONDS", "3600"))
 DB_DSN = os.environ["DB_DSN"]
+# Défense anti-brute-force : verrouillage temporaire par identifiant
+MAX_FAILS = int(os.getenv("AUTH_MAX_FAILS", "5"))
+FAIL_WINDOW = int(os.getenv("AUTH_FAIL_WINDOW", "60"))
+LOCK_SECONDS = int(os.getenv("AUTH_LOCK_SECONDS", "120"))
+_fails = {}   # username -> [timestamps des échecs récents]
+_locked = {}  # username -> instant de fin de verrouillage
 
 pool = ConnectionPool(DB_DSN, min_size=1, max_size=5, open=False)
 
@@ -79,16 +85,33 @@ def metrics():
 
 @app.post("/login", response_model=TokenOut)
 def login(body: LoginIn):
+    now_f = time.time()
+    u = body.username
+    # 1) Compte verrouillé ? (brute-force détectée précédemment)
+    if _locked.get(u, 0) > now_f:
+        log.warning("login verrouillé (anti-brute-force)", extra={"extra_fields": {"user": u}})
+        raise HTTPException(429, "trop de tentatives, réessayez plus tard")
+
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT id, password_hash FROM users WHERE username=%s", (body.username,)
+            "SELECT id, password_hash FROM users WHERE username=%s", (u,)
         ).fetchone()
     if not row or not pbkdf2_sha256.verify(body.password, row[1]):
-        log.info("login refusé", extra={"extra_fields": {"user": body.username}})
+        # 2) Enregistre l'échec ; verrouille si trop d'échecs dans la fenêtre
+        recent = [t for t in _fails.get(u, []) if t > now_f - FAIL_WINDOW]
+        recent.append(now_f)
+        _fails[u] = recent
+        if len(recent) >= MAX_FAILS:
+            _locked[u] = now_f + LOCK_SECONDS
+            log.warning("compte verrouillé (brute-force)", extra={"extra_fields": {"user": u, "lock_s": LOCK_SECONDS}})
+        log.info("login refusé", extra={"extra_fields": {"user": u}})
         raise HTTPException(401, "identifiants invalides")
+
+    # 3) Succès : on réinitialise les compteurs
+    _fails.pop(u, None); _locked.pop(u, None)
     now = int(time.time())
     token = jwt.encode(
-        {"sub": str(row[0]), "username": body.username, "iat": now, "exp": now + JWT_TTL},
+        {"sub": str(row[0]), "username": u, "iat": now, "exp": now + JWT_TTL},
         JWT_SECRET, algorithm="HS256",
     )
     log.info("login ok", extra={"extra_fields": {"user": body.username}})

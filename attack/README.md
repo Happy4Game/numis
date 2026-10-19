@@ -1,23 +1,29 @@
-# Scénarios Red Team
+# Scénarios Red Team + réponses Blue Team
 
-> ⚠️ À exécuter **uniquement** depuis le PC Attaquant, contre le SI fictif de l'équipe.
-> Réseaux du campus, autres groupes et services tiers sont **hors périmètre** (sujet §9).
+> ⚠️ Uniquement contre le SI **fictif** de l'équipe (sujet §9). Python standard, aucune install.
 
-**Aucune dépendance à installer** : scripts en Python standard (`python3`).
-
+## Tout jouer d'un coup (synthèse Red/Blue)
 ```bash
-# DoS applicatif contrôlé -> détecté par le ML -> réparé par la remédiation
-python3 scenarios/dos_flood.py --target http://localhost:8080 --concurrency 60 --duration 40
-
-# Injection SQL -> bloquée par le WAF, tracée dans le SOC
-python3 scenarios/sqli_probe.py --target http://localhost:8080
+make attack-all                 # catalogue complet (hors DoS) + tableau de résultats
 ```
 
-Ou via le Makefile (cible locale par défaut) :
+## Disponibilité (on restaure)
 ```bash
-make attack-dos                                   # vise localhost:8080
-make attack-dos TARGET=http://192.168.137.1:8080  # démo sur le réseau du workshop
-make attack-sqli
+make attack-dos                 # DoS par contention DB -> détection ML -> délestage auto
 ```
 
-L'auth passe par le proxy du dashboard (`:3001`), le flood vise le WAF (`:8080`).
+## Compromission / reconnaissance (on bloque / contient)
+```bash
+python3 attack/scenarios/sqli_probe.py       --target http://localhost:8080  # WAF 403
+python3 attack/scenarios/xss_probe.py        --target http://localhost:8080  # WAF 403
+python3 attack/scenarios/path_traversal.py   --target http://localhost:8080  # WAF 403
+python3 attack/scenarios/recon_scan.py       --target http://localhost:8080  # rien d'exposé + SOC
+python3 attack/scenarios/brute_force.py      --target http://localhost:8080  # verrouillage 429
+python3 attack/scenarios/jwt_tamper.py       --target http://localhost:8080  # rejet 401
+python3 attack/scenarios/priv_escalation.py  --target http://localhost:8080  # rejet 401
+```
+
+Démo réseau : ajouter `TARGET=http://192.168.137.1:8080` aux cibles `make`, ou `--target …` aux scripts.
+
+La correspondance attaque → détection → défense → réponse est détaillée dans
+[`../docs/red-blue-matrix.md`](../docs/red-blue-matrix.md).

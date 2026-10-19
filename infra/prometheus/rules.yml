@@ -26,3 +26,26 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Le détecteur ML signale une anomalie persistante"
+
+  - name: securite-auth-soc
+    rules:
+      - alert: BruteForceSuspectee
+        expr: sum(rate(http_requests_total{job="auth",status="401"}[1m])) > 1
+        for: 20s
+        labels: { severity: warning }
+        annotations:
+          summary: "Pic d'échecs d'authentification — brute-force suspectée"
+
+      - alert: VerrouillageAntiBruteForce
+        expr: sum(rate(http_requests_total{job="auth",status="429"}[1m])) > 0
+        for: 10s
+        labels: { severity: info }
+        annotations:
+          summary: "Défense anti-brute-force engagée (verrouillages 429)"
+
+      - alert: ScanSuspecte
+        expr: sum(rate(http_requests_total{job="payment-api",status=~"4.."}[1m])) > 5
+        for: 20s
+        labels: { severity: warning }
+        annotations:
+          summary: "Taux élevé de réponses 4xx — scan/reconnaissance suspecté"
