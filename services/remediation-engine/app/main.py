@@ -135,28 +135,40 @@ def actions():
 def remediate(req: RemediationRequest, x_remediation_token: str = Header(default="")):
     _authz(x_remediation_token)
 
-    action = req.action if req.action in ALLOWED_ACTIONS else "auto"
-    if action == "auto":
-        action = _decide()
+    requested = req.action if req.action in ALLOWED_ACTIONS else "auto"
+    steps = []
+    if requested == "auto":
+        up = _service_up()
+        action = "throttle" if up else "restart"
+        steps.append("Diagnostic : service "
+                     + ("vivant mais saturé" if up else "injoignable (planté)")
+                     + f" → action retenue : {action}")
+    else:
+        action = requested
+        steps.append(f"Action imposée : {action}")
 
     entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
              "target": req.target, "action": action, "reason": req.reason,
-             "source": req.source, "result": "pending"}
+             "source": req.source, "result": "pending", "steps": steps}
     log.info("remédiation engagée", extra={"extra_fields": entry})
 
     try:
         if action == "restart":
+            steps.append(f"Exécution : redémarrage du conteneur {req.target}")
             recovery_s = _do_restart(req.target)
         elif action == "throttle":
+            steps.append("Exécution : activation du délestage (rate-limit) sur l'API")
             recovery_s = _do_throttle()
         else:
             REFUSED_TOTAL.labels("action_not_allowed").inc()
             raise HTTPException(403, f"action non autorisée: {action}")
+        steps.append(f"Vérification : service rétabli en {round(recovery_s, 1)}s")
         LAST_RECOVERY.set(recovery_s)
         ACTIONS_TOTAL.labels(action, req.target, "success").inc()
         entry.update(result="success", recovery_seconds=round(recovery_s, 1))
         log.info("reprise vérifiée", extra={"extra_fields": entry})
     except HTTPException:
+        steps.append("Vérification : reprise non confirmée dans le délai")
         ACTIONS_TOTAL.labels(action, req.target, "unverified").inc()
         entry.update(result="unverified")
         history.appendleft(entry)

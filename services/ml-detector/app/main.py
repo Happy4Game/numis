@@ -64,7 +64,8 @@ state = {"status": "warmup", "samples": 0, "score": None, "flag": 0,
          "features": {}, "explanation": "", "last_action": None, "consecutive": 0,
          "warmup_target": WARMUP_SAMPLES, "persist_target": PERSIST,
          "poll_interval": POLL, "baseline": None, "score_history": [],
-         "degraded": False, "raw_flag": 0}
+         "degraded": False, "raw_flag": 0,
+         "reasoning": "Initialisation…", "decisions": []}
 model = {"clf": None, "mean": None, "std": None}
 
 
@@ -73,6 +74,13 @@ def _scale(x):
     grande échelle (le débit) écrase les autres -> Isolation Forest bien plus sensible."""
     std = np.where(model["std"] < 1e-6, 1.0, model["std"])
     return (x - model["mean"]) / std
+
+
+def _decision(text, kind="info"):
+    """Journalise une étape de décision (visible dans le dashboard)."""
+    state["decisions"].insert(0, {"ts": time.strftime("%H:%M:%S"), "kind": kind, "text": text})
+    del state["decisions"][15:]
+    log.info(text, extra={"extra_fields": {"decision": kind}})
 _last_action_ts = 0.0
 
 
@@ -118,10 +126,14 @@ def trigger_remediation(reason: str):
             timeout=75.0,
         )
         _last_action_ts = time.time()
+        res = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
         state["last_action"] = {"ts": time.strftime("%H:%M:%S"), "reason": reason,
-                                "result": r.json().get("result", r.status_code)}
+                                "result": res.get("result", r.status_code)}
+        _decision(f"Remédiation « {res.get('action', '?')} » → {res.get('result', '?')} "
+                  f"(rétabli en {res.get('recovery_seconds', '?')}s)", "action")
         log.info("remédiation déclenchée", extra={"extra_fields": {"reason": reason, "http": r.status_code}})
     except Exception as e:
+        _decision(f"Échec de l'appel au moteur de remédiation : {e}", "error")
         log.error("échec appel remédiation", extra={"extra_fields": {"err": str(e)}})
 
 
@@ -160,7 +172,8 @@ def detection_loop():
         while len(train) < WARMUP_SAMPLES:
             vec = collect_vector()
             train.append([vec[f] for f in FEATURES])
-            state.update(samples=len(train), features=vec)
+            state.update(samples=len(train), features=vec,
+                         reasoning="J'apprends la normalité du trafic…")
             time.sleep(POLL)
         X = np.array(train)
         model["mean"], model["std"] = X.mean(axis=0), X.std(axis=0)
@@ -187,15 +200,23 @@ def detection_loop():
         state.update(features=vec, score=round(score, 4), flag=effective,
                      raw_flag=is_anom, degraded=degraded)
 
+        was = state["consecutive"]
         if effective:
-            state["consecutive"] += 1
             state["explanation"] = explain(vec)
-            log.info("incident (anomalie + dégradation)", extra={"extra_fields": {
-                "consecutive": state["consecutive"], "score": score, "why": state["explanation"]}})
+            state["reasoning"] = f"Incident en cours : {state['explanation']}"
+            state["consecutive"] += 1
+            if was == 0:
+                _decision(f"Anomalie détectée — {state['explanation']}", "anomaly")
+            else:
+                _decision(f"Anomalie persistante (cycle {state['consecutive']}/{PERSIST})", "anomaly")
             if state["consecutive"] >= PERSIST:
+                _decision("Seuil atteint → je décide d'engager une remédiation", "decision")
                 trigger_remediation(state["explanation"])
                 state["consecutive"] = 0
         else:
+            state["reasoning"] = f"J'observe le trafic (score {score:.2f}) — conforme au profil appris."
+            if was > 0:
+                _decision("Trafic revenu à la normale, incident clos", "recovered")
             state["consecutive"] = 0
         time.sleep(POLL)
 

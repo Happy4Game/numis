@@ -149,6 +149,37 @@ function Payment({ token, accounts, txs, onTransfer, offline, busy }) {
   )
 }
 
+/* ---------- fil de décision ---------- */
+const KIND = {
+  anomaly:   { c: 'text-alert',  b: 'bg-alert'  },
+  decision:  { c: 'text-accent', b: 'bg-accent' },
+  action:    { c: 'text-accent', b: 'bg-accent' },
+  recovered: { c: 'text-money',  b: 'bg-money'  },
+  error:     { c: 'text-alert',  b: 'bg-alert'  },
+  info:      { c: 'text-muted',  b: 'bg-muted'  },
+}
+
+function DecisionFeed({ items }) {
+  if (!items || items.length === 0) return null
+  return (
+    <div className="mt-4 pt-3 border-t border-line/70">
+      <div className="text-[12px] text-muted mb-2">Fil de décision de l'IA</div>
+      <ul className="space-y-1.5">
+        {items.map((d, i) => {
+          const k = KIND[d.kind] || KIND.info
+          return (
+            <li key={i} className="flex gap-2 text-[12px] leading-snug">
+              <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${k.b}`} />
+              <span className="font-mono tnum text-muted/70 shrink-0">{d.ts}</span>
+              <span className={k.c}>{d.text}</span>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 /* ---------- panneau IA ---------- */
 function Ai({ ml }) {
   if (!ml) return <Panel title="Détecteur d'anomalies (IA)" hint="En attente du service…"><div className="text-[13px] text-muted">Connexion au détecteur…</div></Panel>
@@ -157,7 +188,6 @@ function Ai({ ml }) {
   const warming = phase === 'warmup'
   const anomaly = ml.flag === 1
   const pct = ml.warmup_target ? Math.min(100, Math.round((ml.samples / ml.warmup_target) * 100)) : 0
-
   const tone = anomaly ? 'alert' : warming ? 'warn' : undefined
   const phasePill = warming ? <Pill color="warn">Apprentissage</Pill>
     : phase === 'monitoring' ? <Pill color={anomaly ? 'alert' : 'money'}>{anomaly ? 'Anomalie détectée' : 'Surveillance active'}</Pill>
@@ -169,12 +199,10 @@ function Ai({ ml }) {
       hint="Isolation Forest sur le trafic de l'API de paiement."
       tone={tone}
     >
+      {ml.reasoning && <p className="text-[13px] text-text/80 italic mb-4">« {ml.reasoning} »</p>}
+
       {warming ? (
         <div>
-          <p className="text-[13px] text-muted leading-relaxed mb-3">
-            Le détecteur observe le trafic <span className="text-text">normal</span> pour apprendre à quoi
-            ressemble une situation saine. Il pourra repérer une anomalie une fois cette référence établie.
-          </p>
           <div className="flex items-center justify-between text-[12px] text-muted mb-1">
             <span>Apprentissage de la normalité</span>
             <span className="font-mono tnum">{ml.samples}/{ml.warmup_target} observations</span>
@@ -188,7 +216,6 @@ function Ai({ ml }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* score */}
           <div>
             <div className="flex items-center justify-between text-[12px] text-muted mb-1">
               <span>Score d'anomalie <span className="text-muted/70">(sous 0 = anormal)</span></span>
@@ -197,7 +224,6 @@ function Ai({ ml }) {
             <Sparkline data={ml.score_history} />
           </div>
 
-          {/* signaux : normal vs maintenant */}
           <div className="space-y-2">
             {Object.keys(signalFmt).map((k) => {
               const cur = ml.features?.[k] ?? 0
@@ -218,21 +244,19 @@ function Ai({ ml }) {
             })}
           </div>
 
-          {/* verdict */}
-          {anomaly ? (
+          {anomaly && (
             <div className="rounded-lg bg-alert/10 border border-alert/40 px-3 py-2.5">
               <div className="text-[13px] text-alert font-medium">Comportement suspect</div>
               <div className="text-[13px] text-text mt-0.5">{ml.explanation}</div>
               <div className="text-[12px] text-muted mt-1">
-                Cycles anormaux consécutifs : <span className="font-mono tnum">{ml.consecutive}/{ml.persist_target}</span>
-                {' '}— au seuil, la reprise se déclenche automatiquement.
+                Cycles consécutifs : <span className="font-mono tnum">{ml.consecutive}/{ml.persist_target}</span> — au seuil, la reprise se déclenche.
               </div>
             </div>
-          ) : (
-            <p className="text-[13px] text-muted">Trafic conforme au profil appris. Lancez une attaque pour voir la détection puis la reprise.</p>
           )}
         </div>
       )}
+
+      <DecisionFeed items={ml.decisions} />
     </Panel>
   )
 }
@@ -244,9 +268,9 @@ function Remediation({ actions }) {
       {actions.length === 0 ? (
         <p className="text-[13px] text-muted">Aucune action — le système est sain.</p>
       ) : (
-        <ol className="space-y-2">
+        <ol className="space-y-3">
           {actions.map((a, i) => (
-            <li key={i} className="rounded-lg bg-raised border border-line px-3 py-2">
+            <li key={i} className="rounded-lg bg-raised border border-line px-3 py-2.5">
               <div className="flex items-center justify-between">
                 <span className="font-mono tnum text-[12px] text-muted">{a.ts?.slice(11, 19)}</span>
                 <Pill color={a.result === 'success' ? 'money' : 'warn'}>
@@ -254,9 +278,16 @@ function Remediation({ actions }) {
                 </Pill>
               </div>
               <div className="text-[13px] mt-1">
-                <span className="text-accent">{a.action}</span> → <span className="text-text">{a.target}</span>
+                <span className="text-accent font-medium">{a.action}</span> → <span className="text-text">{a.target}</span>
               </div>
               {a.reason && <div className="text-[12px] text-muted mt-0.5">{a.reason}</div>}
+              {a.steps && a.steps.length > 0 && (
+                <ol className="mt-2 space-y-1 border-l border-line/70 pl-3">
+                  {a.steps.map((st, j) => (
+                    <li key={j} className="text-[12px] text-muted/90">{st}</li>
+                  ))}
+                </ol>
+              )}
             </li>
           ))}
         </ol>
