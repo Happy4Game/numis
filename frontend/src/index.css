@@ -56,3 +56,45 @@
   * { animation: none !important; }
   .shimmer-text { color: #E8EDF6; }
 }
+
+/* ======================= BÊTES DE TRUCS ======================= */
+@keyframes bgshift  { 0%{background-position:0% 0%;} 100%{background-position:100% 100%;} }
+@keyframes breathe  { 0%,100%{transform:translateY(0) scale(1);} 50%{transform:translateY(-4px) scale(1.006);} }
+@keyframes neon     { 0%,100%{box-shadow:0 0 14px rgba(91,141,239,.26), inset 0 0 0 1px rgba(91,141,239,.14);}
+                      50%    {box-shadow:0 0 34px rgba(91,141,239,.60), 0 0 12px rgba(53,214,164,.5), inset 0 0 0 1px rgba(53,214,164,.30);} }
+@keyframes btnpulse { 0%,100%{box-shadow:0 0 0 0 rgba(91,141,239,.55);} 50%{box-shadow:0 0 28px 6px rgba(91,141,239,.60);} }
+@keyframes bgslide  { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+@keyframes shake    { 0%,100%{transform:translateX(0);} 20%{transform:translateX(-3px);} 40%{transform:translateX(3px);} 60%{transform:translateX(-2px);} 80%{transform:translateX(2px);} }
+
+body {
+  background:
+    radial-gradient(1200px 600px at 8% -10%, rgba(91,141,239,.13), transparent 60%),
+    radial-gradient(1000px 520px at 112% 8%, rgba(53,214,164,.11), transparent 60%),
+    #0E1626 !important;
+  background-size: 200% 200% !important;
+  animation: bgshift 16s ease-in-out infinite alternate;
+}
+
+/* panneaux : respiration + lueur néon + barre lumineuse qui balaie le haut */
+main section { position: relative; animation: breathe 6s ease-in-out infinite, neon 3.6s ease-in-out infinite; }
+main section:hover { animation-play-state: paused; }
+main section::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background: linear-gradient(90deg, transparent 0%, #5B8DEF 22%, #35D6A4 42%, transparent 64%);
+  background-size: 200% 100%;
+  animation: bgslide 3s linear infinite;
+}
+
+/* boutons qui pulsent */
+button { animation: btnpulse 2.1s ease-in-out infinite; transition: transform .15s ease; }
+button:hover { transform: translateY(-1px) scale(1.01); }
+
+/* titre brillant */
+.shimmer-text { animation-duration: 2.6s !important; filter: drop-shadow(0 0 8px rgba(91,141,239,.45)); }
+
+/* incident : clignote fort + tremble */
+.anim-glow { animation: glowpulse .9s ease-in-out infinite, shake .5s ease-in-out infinite !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  body, main section, main section::before, button, .shimmer-text, .anim-glow { animation: none !important; }
+}

@@ -255,7 +255,7 @@ function Ai({ ml }) {
           <div>
             <div className="flex items-center justify-between text-[12px] text-muted mb-1">
               <span>Score d'anomalie <span className="text-muted/70">(sous 0 = anormal)</span></span>
-              <span className="font-mono tnum text-text">{ml.score ?? '—'}</span>
+              <span key={ml.score} className="font-mono tnum text-text anim-pop">{ml.score ?? '—'}</span>
             </div>
             <ScoreChart data={ml.history} />
           </div>
@@ -310,7 +310,7 @@ function Remediation({ actions }) {
               <div className="flex items-center justify-between">
                 <span className="font-mono tnum text-[12px] text-muted">{a.ts?.slice(11, 19)}</span>
                 <Pill color={a.result === 'success' ? 'money' : 'warn'}>
-                  {a.result === 'success' ? `rétabli en ${a.recovery_seconds}s` : a.result}
+                  {a.result === 'success' ? (a.recovery_seconds != null ? `rétabli en ${a.recovery_seconds}s` : 'rétabli') : a.result}
                 </Pill>
               </div>
               <div className="text-[13px] mt-1">
