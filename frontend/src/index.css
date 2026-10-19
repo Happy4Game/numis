@@ -90,6 +90,9 @@
 button, select, input, a { transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, background-color .15s ease, color .15s ease; }
 button:hover { transform: translateY(-1px); }
 button:active { transform: translateY(0) scale(.99); }
+/* boutons de navigation : pas de saut / vibration au survol */
+.btn-flat:hover, .btn-flat:active { transform: none; }
+.edge-btn:hover, .edge-btn:active { transform: translateY(-50%); }
 
 /* titre : dégradé STATIQUE (joli mais immobile) */
 .shimmer-text {

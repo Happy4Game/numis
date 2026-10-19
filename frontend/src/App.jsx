@@ -29,6 +29,26 @@ function playChime() {
   } catch { /* audio indisponible : on ignore */ }
 }
 
+/* ---------- alerte sonore (incident détecté) ---------- */
+function playAlert() {
+  try {
+    _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)()
+    const ctx = _audioCtx
+    if (ctx.state === 'suspended') ctx.resume()
+    const now = ctx.currentTime
+    ;[[0, 466.16], [0.18, 466.16], [0.36, 370]].forEach(([t, f]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain()
+      o.type = 'square'; o.frequency.value = f
+      o.connect(g); g.connect(ctx.destination)
+      const st = now + t
+      g.gain.setValueAtTime(0.0001, st)
+      g.gain.exponentialRampToValueAtTime(0.13, st + 0.02)
+      g.gain.exponentialRampToValueAtTime(0.0001, st + 0.16)
+      o.start(st); o.stop(st + 0.2)
+    })
+  } catch { /* audio indisponible */ }
+}
+
 /* ---------- éclat au curseur lors d'un paiement ---------- */
 function Burst({ at }) {
   if (!at) return null
@@ -568,7 +588,7 @@ function Synthese({ ml, actions, containers, health, go, fill }) {
           <div className="mt-2"><ScoreChart data={ml?.history} /></div>
           <div className="flex items-center justify-between mt-2 text-[12px] text-muted">
             <span>score <span className="font-mono tnum text-text">{ml?.score ?? '—'}</span></span>
-            <NavBtn side="right" label="Détail IA" onClick={() => go(2)} />
+            <NavBtn side="left" label="Détection & reprise" onClick={() => go(0)} />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -584,7 +604,7 @@ function Synthese({ ml, actions, containers, health, go, fill }) {
           </div>
         </div>
         <div className="flex items-center justify-between">
-          <NavBtn side="left" label="Reprise & conteneurs" onClick={() => go(0)} />
+          <NavBtn side="right" label="Conteneurs (watchdog)" onClick={() => go(2)} />
           <a href={`http://${location.hostname}:3000`} target="_blank" rel="noreferrer"
              className="text-[12px] text-sky2 hover:text-text px-2 py-1 rounded-lg hover:bg-raised/70">Grafana ↗</a>
         </div>
@@ -611,9 +631,9 @@ export default function App() {
   const [burst, setBurst] = useState(null)
 
   const SLIDES = [
-    { id: 'reprise', label: 'Reprise & conteneurs' },
+    { id: 'detection', label: 'Détection & reprise' },
     { id: 'essentiel', label: "Vue d'ensemble" },
-    { id: 'ia', label: 'Détecteur IA' },
+    { id: 'conteneurs', label: 'Conteneurs' },
   ]
   const go = (i) => setSlide(Math.max(0, Math.min(SLIDES.length - 1, i)))
 
@@ -709,12 +729,14 @@ export default function App() {
   }
 
   const anomaly = ml?.flag === 1
+  const prevAnom = useRef(false)
+  useEffect(() => { if (anomaly && !prevAnom.current) playAlert(); prevAnom.current = anomaly }, [anomaly])
   const upC = containers.filter((c) => c.status === 'running').length
   const feat = ml?.features || {}
 
   const EdgeBtn = ({ dir, onClick, disabled }) => (
     <button onClick={onClick} disabled={disabled} aria-label={dir === 'l' ? 'Précédent' : 'Suivant'}
-      className={`hidden md:grid place-items-center absolute top-1/2 -translate-y-1/2 ${dir === 'l' ? 'left-3' : 'right-3'} z-20 w-11 h-11 rounded-full glass border border-hair text-[20px] text-muted hover:text-text disabled:opacity-0 disabled:pointer-events-none`}>
+      className={`edge-btn hidden md:grid place-items-center absolute top-1/2 -translate-y-1/2 ${dir === 'l' ? 'left-3' : 'right-3'} z-20 w-11 h-11 rounded-full glass border border-hair text-[20px] text-muted hover:text-text disabled:opacity-0 disabled:pointer-events-none`}>
       {dir === 'l' ? '‹' : '›'}
     </button>
   )
@@ -755,8 +777,8 @@ export default function App() {
 
             <section className="w-full shrink-0 h-full overflow-y-auto px-4 sm:px-6 py-4">
               <div className="max-w-7xl mx-auto h-full grid lg:grid-cols-2 gap-4 min-h-0">
+                <Ai ml={ml} fill />
                 <Remediation actions={actions} fill />
-                <Containers items={containers} fill />
               </div>
             </section>
 
@@ -783,7 +805,7 @@ export default function App() {
 
             <section className="w-full shrink-0 h-full overflow-y-auto px-4 sm:px-6 py-4">
               <div className="max-w-7xl mx-auto h-full min-h-0">
-                <Ai ml={ml} wide fill />
+                <Containers items={containers} fill />
               </div>
             </section>
 
@@ -795,7 +817,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-5 py-2 flex items-center justify-center gap-2">
           {SLIDES.map((s, i) => (
             <button key={s.id} onClick={() => go(i)}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[12.5px] border transition ${i === slide ? 'bg-accent/15 border-accent/40 text-text' : 'bg-raised/40 border-line text-muted hover:text-text hover:border-hair'}`}>
+              className={`btn-flat flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[12.5px] border transition ${i === slide ? 'bg-accent/15 border-accent/40 text-text' : 'bg-raised/40 border-line text-muted hover:text-text hover:border-hair'}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${i === slide ? 'bg-accent' : 'bg-faint'}`} />
               {s.label}
             </button>
