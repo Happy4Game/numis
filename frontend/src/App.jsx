@@ -10,6 +10,7 @@ const authHeader = (t) => ({ Authorization: `Bearer ${t}` })
 
 /* ---------- formatage ---------- */
 const euro = (n) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n)
+const FLOOR = { request_rate: 0.5, error_ratio: 0.01, p95_latency: 0.005 }
 const signalFmt = {
   request_rate: { label: 'Débit', unit: 'req/s', f: (v) => v.toFixed(1) },
   error_ratio:  { label: "Taux d'erreur", unit: '', f: (v) => (v * 100).toFixed(1) + ' %' },
@@ -201,7 +202,7 @@ function Ai({ ml }) {
             {Object.keys(signalFmt).map((k) => {
               const cur = ml.features?.[k] ?? 0
               const base = ml.baseline?.[k]
-              const ratio = base && base > 1e-6 ? cur / base : null
+              const ratio = base && base > FLOOR[k] ? cur / base : null
               const hot = ratio !== null && ratio >= 1.5
               const f = signalFmt[k]
               return (
