@@ -268,3 +268,71 @@ def led_force(state: str, _u: str = Depends(_require_backoffice)):
     """Le back-office peut forcer un état LED (ex: extinction à la fermeture)."""
     _led(state)
     return {"state": state}
+
+
+# ================= Gestion des comptes & accès (back-office) =================
+class NewUserIn(BaseModel):
+    username: str
+    password: str
+
+
+@app.get("/backoffice/status")
+def backoffice_status():
+    """Public : indique si le système est en première mise en service (aucun visage)."""
+    _, faces = _face("GET", "/users")
+    n = len(faces or [])
+    return {"enrolled": n, "bootstrap": n == 0}
+
+
+@app.get("/backoffice/accounts")
+def backoffice_accounts(_u: str = Depends(_require_backoffice)):
+    """Liste les comptes (utilisateurs) et leur statut d'habilitation faciale."""
+    _, faces = _face("GET", "/users")
+    fmap = {f["username"]: f.get("samples", 0) for f in (faces or [])}
+    with pool.connection() as conn:
+        rows = conn.execute("SELECT username FROM users ORDER BY username").fetchall()
+    return [{"username": r[0], "has_face": r[0] in fmap, "face_samples": fmap.get(r[0], 0)} for r in rows]
+
+
+@app.post("/backoffice/users")
+def create_account(body: NewUserIn, _u: str = Depends(_require_backoffice)):
+    """Crée un nouveau login (+ 2 comptes de démonstration)."""
+    u = body.username.strip()
+    if not u or len(body.password) < 4:
+        raise HTTPException(400, "identifiant requis et mot de passe d'au moins 4 caractères")
+    pw = pbkdf2_sha256.hash(body.password)
+    with pool.connection() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE username=%s", (u,)).fetchone():
+            raise HTTPException(409, "cet identifiant existe déjà")
+        uid = conn.execute(
+            "INSERT INTO users (username,password_hash) VALUES (%s,%s) RETURNING id", (u, pw)
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO accounts (owner_id,label,balance) VALUES (%s,'Compte A',1000),(%s,'Compte B',1000)",
+            (uid, uid),
+        )
+    log.info("compte créé", extra={"extra_fields": {"user": u}})
+    return {"username": u, "created": True}
+
+
+@app.delete("/backoffice/users/{username}")
+def delete_account(username: str, current: str = Depends(_require_backoffice)):
+    """Supprime un login (comptes + transactions liés) et révoque son visage."""
+    if username == "demo":
+        raise HTTPException(400, "le compte 'demo' est utilisé par la supervision — non supprimable")
+    if username == current:
+        raise HTTPException(400, "vous ne pouvez pas supprimer votre propre compte connecté")
+    with pool.connection() as conn:
+        row = conn.execute("SELECT id FROM users WHERE username=%s", (username,)).fetchone()
+        if not row:
+            raise HTTPException(404, "compte introuvable")
+        uid = row[0]
+        with conn.transaction():
+            conn.execute(
+                "DELETE FROM transactions WHERE from_account IN (SELECT id FROM accounts WHERE owner_id=%s) "
+                "OR to_account IN (SELECT id FROM accounts WHERE owner_id=%s)", (uid, uid))
+            conn.execute("DELETE FROM accounts WHERE owner_id=%s", (uid,))
+            conn.execute("DELETE FROM users WHERE id=%s", (uid,))
+    _face("DELETE", f"/users/{username}")   # révoque aussi le visage (best-effort)
+    log.info("compte supprimé", extra={"extra_fields": {"user": username}})
+    return {"deleted": username}
