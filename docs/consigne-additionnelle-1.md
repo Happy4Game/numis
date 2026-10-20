@@ -51,7 +51,7 @@ par un objet connecté **ESP8266** (LED bicolore rouge/vert) relié au point d'a
   session back-office.
 
 ## 5. Limites assumées (à dire au jury)
-- **LBPH n'a pas de détection de vivacité** : une **photo** du visage pourrait tromper la
+- **La reconnaissance par empreinte (SFace) n'a pas de détection de vivacité** : une **photo** du visage pourrait tromper la
   reconnaissance (attaque par présentation). Parade industrielle : *liveness* (clignement,
   mouvement, profondeur) — hors périmètre d'un prototype court. Voir matrice Red/Blue, ligne 10.
 - Reconnaissance sensible à l'éclairage et au cadrage (enrôler 3–6 photos variées améliore).
