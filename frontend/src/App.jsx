@@ -220,6 +220,7 @@ function Payment({ token, accounts, txs, onTransfer, offline, busy, fill }) {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [amount, setAmount] = useState('25')
+  const [probe, setProbe] = useState({ state: 'idle' })
 
   useEffect(() => {
     if (accounts.length >= 2 && !from) { setFrom(String(accounts[0].id)); setTo(String(accounts[1].id)) }
@@ -240,6 +241,25 @@ function Payment({ token, accounts, txs, onTransfer, offline, busy, fill }) {
     e.preventDefault()
     if (from === to) return
     onTransfer({ from_account: +from, to_account: +to, amount: +amount })
+  }
+
+  // Preuve de reprise : transaction témoin de 1 EUR, avec latence + horodatage.
+  const runWitness = async () => {
+    if (accounts.length < 2) return
+    setProbe({ state: 'run' })
+    const t0 = performance.now()
+    const at = new Date().toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris' })
+    try {
+      await api('/api/payment/transactions', {
+        method: 'POST', headers: { ...authHeader(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_account: accounts[0].id, to_account: accounts[1].id, amount: 1 }),
+      })
+      setProbe({ state: 'ok', ms: Math.round(performance.now() - t0), at })
+    } catch (e) {
+      const x = String(e)
+      const msg = x.includes('429') ? 'trafic régulé (429)' : x.includes('400') ? 'solde insuffisant' : 'service injoignable'
+      setProbe({ state: 'ko', msg, at })
+    }
   }
 
   return (
@@ -293,6 +313,26 @@ function Payment({ token, accounts, txs, onTransfer, offline, busy, fill }) {
           {busy ? 'Envoi…' : 'Envoyer le paiement'}
         </button>
       </form>
+
+      {/* preuve de reprise — transaction témoin (sujet §2 : "service de nouveau utilisable") */}
+      <div className="mt-4 pt-4 border-t border-line/50">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[12.5px] text-text font-medium">Preuve de reprise</div>
+            <div className="text-[11.5px] text-muted">Transaction témoin de 1 € — le service est-il utilisable ?</div>
+          </div>
+          <button type="button" onClick={runWitness} disabled={probe.state === 'run' || accounts.length < 2}
+            className="btn-flat shrink-0 rounded-lg bg-money/15 text-money border border-money/30 hover:bg-money/25 px-3 py-2 text-[13px] font-medium disabled:opacity-50">
+            {probe.state === 'run' ? 'Test…' : 'Lancer le témoin'}
+          </button>
+        </div>
+        {(probe.state === 'ok' || probe.state === 'ko') && (
+          <div className={'mt-2 rounded-lg border px-3 py-2 text-[12.5px] anim-slidein ' + (probe.state === 'ok' ? 'border-money/40 bg-money/10 text-money' : 'border-alert/40 bg-alert/10 text-alert')}>
+            {probe.state === 'ok' ? '✓ Service utilisable — transaction réglée en ' + probe.ms + ' ms' : '✗ Service indisponible — ' + probe.msg}
+            <span className="text-muted ml-2 font-mono tnum">{probe.at}</span>
+          </div>
+        )}
+      </div>
 
       <div className="mt-4">
         <div className="text-[11.5px] uppercase tracking-wider text-faint mb-2">Derniers mouvements</div>
