@@ -92,7 +92,7 @@ services:
     container_name: rsa-face-auth
     environment:
       MODEL_DIR: /model
-      FACE_THRESHOLD: ${FACE_THRESHOLD:-70}
+      FACE_THRESHOLD: ${FACE_THRESHOLD:-95}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - face-model:/model          # habilitations (visages) + modèle persistés
