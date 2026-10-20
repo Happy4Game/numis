@@ -26,6 +26,10 @@ networks:
     ipam:
       config:
         - subnet: 172.29.0.0/16
+          gateway: 172.29.0.1
+          # Plage d'attribution AUTOMATIQUE restreinte : laisse 172.29.0.2-254 libres
+          # pour les IP statiques (ex: payment-api=172.29.0.10). Évite les collisions.
+          ip_range: 172.29.1.0/24
 
 volumes:
   db-data:
