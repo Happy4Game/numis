@@ -613,6 +613,127 @@ function Synthese({ ml, actions, containers, health, go, fill }) {
   )
 }
 
+/* ---------- guide intégré : pages d'explication ---------- */
+const GUIDE_ICON = (<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5V5.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M4 5.5A2.5 2.5 0 0 0 6.5 8H20" stroke="currentColor" strokeWidth="1.6"/></svg>)
+function GH({ children }) { return <h4 className="text-[13.5px] font-semibold text-text mt-5 mb-1.5 first:mt-0">{children}</h4> }
+function GP({ children }) { return <p className="text-[13px] text-muted leading-relaxed mb-2">{children}</p> }
+function GL({ items }) {
+  return <ul className="space-y-1.5 mb-2">{items.map((t, i) => (<li key={i} className="flex gap-2 text-[13px] text-muted leading-relaxed"><span className="text-accent mt-px shrink-0">▸</span><span>{t}</span></li>))}</ul>
+}
+function Code({ children }) { return <code className="px-1.5 py-0.5 rounded text-[12px] font-mono bg-raised/70 text-sky2 border border-line">{children}</code> }
+const B = ({ children }) => <b className="text-text font-medium">{children}</b>
+
+const GUIDE = [
+  { id: 'projet', icon: '🎯', title: 'Le projet', body: (<div>
+    <GP>Numis est une plateforme de paiement <B>fictive</B>. Son objectif : démontrer la <B>cyber-résilience</B> — le système détecte une attaque ou une panne, décide de la bonne action, se répare <B>sans intervention humaine</B> (Zero-Touch Recovery), puis prouve qu'il est de nouveau utilisable.</GP>
+    <GH>Deux natures d'incident, deux réponses</GH>
+    <GL items={[<><B>Disponibilité</B> (DoS/DDoS, crash d'un conteneur, panne de base) → on rétablit : redémarrage, délestage ciblé, diagnostic de dépendance.</>, <><B>Compromission</B> (injection SQL, XSS, traversée) → on bloque en amont via le WAF + alerte SOC. On n'« auto-répare » pas une fuite.</>]} />
+    <GP>Toute la chaîne <B>détection → décision → reprise → vérification</B> est visible en direct ici et dans Grafana.</GP>
+  </div>) },
+
+  { id: 'dashboard', icon: '🧭', title: 'Lire le dashboard', body: (<div>
+    <GH>Trois pages (navigation ← →, clavier, ou barre du bas)</GH>
+    <GL items={[<><B>Détection & reprise</B> : le détecteur IA et la reprise autonome côte à côte.</>, <><B>Vue d'ensemble</B> : les KPI temps réel, le paiement Numis, la synthèse.</>, <><B>Conteneurs</B> : l'état de vie de toute la stack (watchdog).</>]} />
+    <GH>Le bandeau de KPI</GH>
+    <GL items={[<><B>Système</B> : sain / incident.</>, <><B>Débit</B> : requêtes par seconde sur l'API.</>, <><B>Latence p95</B> : 95ᵉ centile du temps de réponse.</>, <><B>Taux d'erreur</B> : part de réponses en erreur.</>, <><B>Conteneurs</B> : actifs / total.</>, <><B>Reprises</B> : nombre d'actions autonomes.</>]} />
+    <GH>Retours sonores & visuels</GH>
+    <GP>Un <B>carillon</B> + un éclat au curseur à chaque paiement réglé ; un <B>bip d'alerte</B> au déclenchement d'un incident. Les animations sont <B>événementielles</B> (jamais en boucle) et respectent la préférence « réduire les animations ».</GP>
+  </div>) },
+
+  { id: 'archi', icon: '🗺️', title: 'Architecture', body: (<div>
+    <GH>Chemin métier (nominal)</GH>
+    <GP>navigateur → <Code>WAF :8080</Code> → <Code>payment-api</Code> → <Code>db</Code>. Le service <Code>auth</Code> émet un JWT ; <Code>payment-api</Code> le valide <B>localement</B> avec le secret partagé (pas d'aller-retour réseau par requête, critique sous charge).</GP>
+    <GH>Chaîne de résilience</GH>
+    <GP><Code>payment-api</Code> expose <Code>/metrics</Code> → <Code>prometheus</Code> scrape → <Code>ml-detector</Code> score → (anomalie persistante) → <Code>remediation-engine</Code> → restart/délestage → attend <Code>/health</Code>.</GP>
+    <GH>Exposition réseau</GH>
+    <GP>Le <B>WAF est le seul point d'entrée publié</B> de l'API. La base, l'auth, Prometheus, Loki, le détecteur, le moteur de reprise et Ollama ne sont jamais exposés : le dashboard les atteint par un <B>reverse-proxy nginx</B>.</GP>
+  </div>) },
+
+  { id: 'ia', icon: '🧠', title: 'Détection IA', body: (<div>
+    <GP>Un <B>Isolation Forest</B> (apprentissage <B>non supervisé</B>, léger et explicable) apprend le profil de trafic <B>normal</B>, puis signale ce qui s'en écarte.</GP>
+    <GH>Les 3 signaux observés (normalisés en z-score)</GH>
+    <GL items={[<><B>Débit</B> (req/s), <B>taux d'erreur</B>, <B>latence p95</B>.</>]} />
+    <GH>Déroulé</GH>
+    <GL items={[<><B>Apprentissage</B> (warmup) : il accumule des observations pour fixer la normalité.</>, <><B>Surveillance</B> : il calcule un <B>score</B> (sous 0 = anormal).</>, <><B>Garde de dégradation</B> : une anomalie ML seule ne suffit pas — il faut aussi une dégradation <B>réelle</B> (erreurs/latence hautes). Sinon un site inactif partirait en « anomalie ».</>, <><B>Persistance</B> : l'incident n'est déclaré qu'après N cycles consécutifs (anti faux-positif), puis la reprise est appelée.</>, <><B>Re-arm</B> : après reprise, il ne ré-agit que lorsque les métriques sont revenues à la normale.</>]} />
+  </div>) },
+
+  { id: 'reprise', icon: '🔧', title: 'Reprise autonome', body: (<div>
+    <GP>Le <Code>remediation-engine</Code> applique un <B>playbook</B> : il choisit l'action selon le diagnostic, puis <B>vérifie</B> le rétablissement.</GP>
+    <GH>Décision</GH>
+    <GL items={[<><B>Redémarrage</B> si un conteneur est mort ou injoignable.</>, <><B>Délestage ciblé</B> (throttle) si la dégradation vient d'une surcharge.</>, <><B>Diagnostic de dépendance</B> : si la base tombe, il redémarre la <B>base</B> (pas l'API qui en dépend).</>]} />
+    <GH>Vérification</GH>
+    <GP>Un conteneur relancé ne suffit pas : il <B>attend le retour à <Code>/health</Code></B> et affiche « rétabli en X s » — on prouve le retour à un état utilisable.</GP>
+    <GH>Privilèges encadrés (point noté §3.4)</GH>
+    <GL items={[<>Seul lui pilote Docker ; <B>allowlist de cibles</B> (toute autre = refus), <B>allowlist d'actions</B> (restart/protect), <B>jeton</B> obligatoire, et <B>traçabilité</B> de chaque demande.</>]} />
+  </div>) },
+
+  { id: 'watchdog', icon: '🫀', title: 'Watchdog & conteneurs', body: (<div>
+    <GP>En plus de la détection sur l'API de paiement, un <B>watchdog</B> surveille la <B>vie de toute la stack</B>.</GP>
+    <GL items={[<>Si un conteneur <B>meurt</B> (confirmé « exited/dead » sur 2 cycles), il est <B>redémarré</B> automatiquement.</>, <>Un <B>cooldown</B> par conteneur évite les boucles de redémarrage en cas de crash répété.</>, <>La page <B>Conteneurs</B> montre chaque service avec une pastille verte (actif) ou rouge (à relancer).</>]} />
+    <GP>Teste-le : <Code>make chaos-kill</Code> (tue l'API) ou <Code>make chaos-kill-db</Code> (tue la base) — et observe la reprise.</GP>
+  </div>) },
+
+  { id: 'secu', icon: '🛡️', title: 'Sécurité & WAF', body: (<div>
+    <GP>Le <B>WAF ModSecurity (OWASP CRS)</B> filtre tout le trafic entrant de l'API.</GP>
+    <GL items={[<>Bloque <B>injections SQL</B>, <B>XSS</B>, <B>traversées de chemin</B>, scans de reconnaissance.</>, <>Sur <Code>auth</Code> : <B>anti-brute-force</B> (verrouillage après plusieurs échecs).</>, <>Secrets chiffrés avec <B>SOPS + age</B>.</>]} />
+    <GH>Dispo vs compromission</GH>
+    <GP>Une injection SQL n'est pas « réparée » automatiquement : on la <B>bloque en amont</B> et on lève une <B>alerte SOC</B>. C'est volontaire — on ne prétend pas auto-remédier une compromission.</GP>
+    <GP>À tester : <Code>make attack-sqli</Code> ou le catalogue complet <Code>make attack-all</Code>.</GP>
+  </div>) },
+
+  { id: 'ddos', icon: '🌊', title: 'DDoS : délestage ciblé', body: (<div>
+    <GH>Le piège du délestage naïf</GH>
+    <GP>Un rate-limit <B>global</B> fait tomber aussi les clients légitimes : le flood remplit le budget, et un vrai virement est rejeté avec l'attaquant.</GP>
+    <GH>Notre approche</GH>
+    <GL items={[<>Sous protection, on rejette <B>tôt la signature d'attaque</B> (auto-virement net-nul, <Code>from == to</Code>) <B>avant toute prise de verrou DB</B>.</>, <>Les virements <B>légitimes</B> (<Code>from != to</Code>) passent et restent disponibles.</>, <>Un <Code>lock_timeout</Code> court évite qu'un virement légitime reste bloqué derrière le flood.</>]} />
+    <GP>Résultat : <B>on peut toujours payer pendant un DDoS</B>. La dégradation reste visible hors protection, donc la détection se déclenche quand même. À tester : <Code>make attack-ddos</Code>.</GP>
+  </div>) },
+
+  { id: 'obs', icon: '📡', title: 'Observabilité / SOC', body: (<div>
+    <GL items={[<><B>Prometheus</B> scrape <Code>/metrics</Code> (PromQL, histogrammes de latence) — c'est la source de vérité du détecteur.</>, <><B>Loki + Promtail</B> centralisent les logs JSON de tous les services.</>, <><B>Grafana</B> rend les dashboards et porte l'<B>alerting</B> (fonction SOC).</>, <><B>Alertmanager</B> publie des alertes lisibles.</>]} />
+    <GP>Choix assumé : pas d'Elastic (trop lourd pour 16 Go) — <B>Loki + Grafana</B> tiennent le rôle de SIEM/SOC léger. Grafana est accessible depuis l'en-tête du dashboard.</GP>
+  </div>) },
+
+  { id: 'rag', icon: '💬', title: 'Assistant RAG', body: (<div>
+    <GP>Un <B>assistant opérateur</B> local répond en langage naturel sur les procédures, à partir de la documentation du projet.</GP>
+    <GL items={[<>Pile : <B>Ollama</B> (LLM local ≤ 8B, Qwen2.5 3B) + <B>LangChain</B> + <B>Chroma</B> (vecteurs).</>, <>Il lit la doc en <B>lecture seule</B> et n'a <B>AUCUN privilège</B> sur le système.</>, <>Il est volontairement <B>distinct</B> du moteur de remédiation (sujet §3.3) : l'assistant explique, il n'agit jamais.</>]} />
+  </div>) },
+]
+
+function Guide({ open, onClose, sec, setSec }) {
+  if (!open) return null
+  const S = GUIDE[sec] || GUIDE[0]
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-6 bg-deep/80 backdrop-blur-sm" onClick={onClose}>
+      <div className="relative w-full max-w-5xl h-[88vh] rounded-2xl glass border border-hair shadow-2xl flex overflow-hidden anim-fadeup" onClick={(e) => e.stopPropagation()}>
+        <aside className="w-60 shrink-0 border-r border-line/60 p-3 overflow-y-auto hidden sm:block">
+          <div className="px-2 py-2 text-[11px] uppercase tracking-wider text-faint">Comprendre le système</div>
+          {GUIDE.map((g, i) => (
+            <button key={g.id} onClick={() => setSec(i)}
+              className={"btn-flat w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left mb-0.5 " + (i === sec ? 'bg-accent/15 text-text ring-1 ring-accent/30' : 'text-muted hover:bg-raised/60 hover:text-text')}>
+              <span className="text-[15px] leading-none">{g.icon}</span>{g.title}
+            </button>
+          ))}
+        </aside>
+        <div className="flex-1 min-w-0 flex flex-col">
+          <header className="flex items-center justify-between px-5 py-3 border-b border-line/60 shrink-0">
+            <div className="flex items-center gap-2.5"><span className="text-[18px]">{S.icon}</span><h3 className="text-[16px] font-semibold text-text">{S.title}</h3></div>
+            <button onClick={onClose} title="Fermer (Échap)" className="btn-flat w-8 h-8 grid place-items-center rounded-lg text-muted hover:text-text hover:bg-raised/70">✕</button>
+          </header>
+          <div className="p-5 overflow-y-auto">{S.body}</div>
+          <div className="sm:hidden flex gap-1.5 overflow-x-auto px-3 py-2 border-t border-line/60">
+            {GUIDE.map((g, i) => (
+              <button key={g.id} onClick={() => setSec(i)}
+                className={"btn-flat shrink-0 w-9 h-9 grid place-items-center rounded-full text-[15px] " + (i === sec ? 'bg-accent/15 ring-1 ring-accent/30' : 'bg-raised/40')}>{g.icon}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 /* ---------- application ---------- */
 export default function App() {
   const [token, setToken] = useState(null)
@@ -629,6 +750,9 @@ export default function App() {
   const flash = useRef(false)
   const pointer = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
   const [burst, setBurst] = useState(null)
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [guideSec, setGuideSec] = useState(0)
+  const guideOpenRef = useRef(false); guideOpenRef.current = guideOpen
 
   const SLIDES = [
     { id: 'detection', label: 'Détection & reprise' },
@@ -641,6 +765,7 @@ export default function App() {
     const onKey = (e) => {
       const tag = (e.target.tagName || '').toLowerCase()
       if (tag === 'input' || tag === 'select' || tag === 'textarea') return
+      if (guideOpenRef.current) { if (e.key === 'Escape') setGuideOpen(false); return }
       if (e.key === 'ArrowRight') setSlide((s) => Math.min(SLIDES.length - 1, s + 1))
       if (e.key === 'ArrowLeft') setSlide((s) => Math.max(0, s - 1))
     }
@@ -762,6 +887,10 @@ export default function App() {
               <span className={`w-2 h-2 rounded-full ${anomaly ? 'bg-alert' : 'bg-money'}`} />
               {anomaly ? 'Incident en cours' : 'Système sain'}
             </div>
+            <button onClick={() => setGuideOpen(true)} title="Comprendre le système"
+              className="btn-flat flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] bg-raised/70 border border-line text-muted hover:text-text hover:border-accent">
+              {GUIDE_ICON}<span className="hidden sm:inline">Comprendre</span>
+            </button>
             <ServicesMenu items={containers} />
             <Clock />
           </div>
@@ -824,6 +953,8 @@ export default function App() {
           ))}
         </div>
       </nav>
+
+      <Guide open={guideOpen} onClose={() => setGuideOpen(false)} sec={guideSec} setSec={setGuideSec} />
 
       <Burst at={burst} />
 
