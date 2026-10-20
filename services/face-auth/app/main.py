@@ -1,13 +1,13 @@
-"""Microservice de reconnaissance faciale (IA légère).
+"""Microservice de reconnaissance faciale par EMPREINTES (embeddings).
 
 Confirme que le visage présenté correspond à l'identifiant revendiqué. Appelé UNIQUEMENT
-par le service `auth` (interne, jamais exposé publiquement). Gère aussi les habilitations
-(enrôlement, liste, suppression des identités autorisées).
+par le service `auth` (interne). Gère les habilitations (enrôlement/liste/révocation).
 
-Pile volontairement légère (consigne : PC Hôte 16 Go) : OpenCV LBPH + détecteur Haar.
-Pas de dlib ni de torch. Modèle et photos d'enrôlement persistés sur volume.
+Pile : OpenCV **YuNet** (détection robuste) + **SFace** (empreinte 128-D), tous deux
+inclus dans opencv-contrib — pas de dlib ni de torch. Bien plus fiable que LBPH.
+On compare les empreintes par similarité cosinus. Modèles et empreintes persistés.
 """
-import os, json, glob, base64, threading, logging, sys, time
+import os, glob, base64, threading, logging, sys, time, json
 
 import numpy as np
 import cv2
@@ -27,107 +27,98 @@ log = logging.getLogger(SERVICE)
 
 MODEL_DIR = os.getenv("MODEL_DIR", "/model")
 FACES_DIR = os.path.join(MODEL_DIR, "faces")
-MODEL_PATH = os.path.join(MODEL_DIR, "lbph.yml")
-LABELS_PATH = os.path.join(MODEL_DIR, "labels.json")
-THRESHOLD = float(os.getenv("FACE_THRESHOLD", "70"))     # distance LBPH : plus bas = plus sûr
-MIN_SAMPLES = int(os.getenv("FACE_MIN_SAMPLES", "3"))     # photos conseillées à l'enrôlement
-SIZE = (200, 200)
+YUNET = os.getenv("YUNET_PATH", "/app/models/face_detection_yunet.onnx")
+SFACE = os.getenv("SFACE_PATH", "/app/models/face_recognition_sface.onnx")
+COSINE = float(os.getenv("FACE_COSINE", "0.30"))      # similarité cosinus mini (SFace ~0.363)
+MIN_SAMPLES = int(os.getenv("FACE_MIN_SAMPLES", "2"))
 
 os.makedirs(FACES_DIR, exist_ok=True)
-_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 _lock = threading.Lock()
-_state = {"recognizer": None, "labels": {}}   # labels : username -> int
+_emb = {}                                   # username -> list[np.ndarray (1,128)]
+_models = {"det": None, "rec": None, "err": None}
 
-app = FastAPI(title="RSA Face-Auth")
+app = FastAPI(title="RSA Face-Auth (SFace)")
 
 
 class EnrollIn(BaseModel):
     username: str
-    images: list[str]          # images base64 (data-URL acceptées)
+    images: list[str]
 
 class VerifyIn(BaseModel):
     username: str
     image: str
 
 
-# ----------------------------- traitement image -----------------------------
+# ----------------------------- modèles & image ------------------------------
+def _init_models():
+    try:
+        det = cv2.FaceDetectorYN.create(YUNET, "", (320, 320), 0.8, 0.3, 5000)
+        rec = cv2.FaceRecognizerSF.create(SFACE, "")
+        _models.update(det=det, rec=rec, err=None)
+        log.info("modèles YuNet + SFace chargés")
+    except Exception as e:  # pragma: no cover
+        _models.update(err=str(e))
+        log.error(f"chargement des modèles échoué : {e}")
+
 def _decode(b64: str):
     if "," in b64:
         b64 = b64.split(",", 1)[1]
     try:
-        arr = np.frombuffer(base64.b64decode(b64), np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        img = cv2.imdecode(np.frombuffer(base64.b64decode(b64), np.uint8), cv2.IMREAD_COLOR)
     except Exception:
         img = None
     if img is None:
         raise HTTPException(400, "image illisible")
     return img
 
-def _largest_face(gray):
-    faces = _cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(80, 80))
-    if len(faces) == 0:
+def _feature(img):
+    det, rec = _models["det"], _models["rec"]
+    if det is None or rec is None:
+        raise HTTPException(503, f"modèles indisponibles : {_models['err']}")
+    h, w = img.shape[:2]
+    det.setInputSize((w, h))
+    _, faces = det.detect(img)
+    if faces is None or len(faces) == 0:
         return None
-    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-    crop = cv2.resize(gray[y:y + h, x:x + w], SIZE)
-    return cv2.equalizeHist(crop)
+    face = faces[int(np.argmax(faces[:, -1]))]          # visage au meilleur score
+    aligned = rec.alignCrop(img, face)
+    return rec.feature(aligned).copy()                   # empreinte (1,128)
 
-def _crop(b64: str):
-    gray = cv2.cvtColor(_decode(b64), cv2.COLOR_BGR2GRAY)
-    return _largest_face(gray)
+def _feature_b64(b64):
+    return _feature(_decode(b64))
 
-
-# ----------------------------- modèle (train/load) --------------------------
-def _retrain():
-    users = sorted(d for d in os.listdir(FACES_DIR) if os.path.isdir(os.path.join(FACES_DIR, d)))
-    labels = {u: i for i, u in enumerate(users)}
-    X, y = [], []
-    for u in users:
-        for f in glob.glob(os.path.join(FACES_DIR, u, "*.png")):
-            im = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-            if im is not None:
-                X.append(im); y.append(labels[u])
-    if not X:
-        _state.update(recognizer=None, labels={})
-        if os.path.exists(MODEL_PATH):
-            os.remove(MODEL_PATH)
-        json.dump({}, open(LABELS_PATH, "w"))
-        return 0
-    rec = cv2.face.LBPHFaceRecognizer_create()
-    rec.train(X, np.array(y))
-    rec.write(MODEL_PATH)
-    json.dump(labels, open(LABELS_PATH, "w"))
-    _state.update(recognizer=rec, labels=labels)
-    return len(X)
+def _cos(a, b):
+    return float(_models["rec"].match(a, b, cv2.FaceRecognizerSF_FR_COSINE))
 
 def _load():
-    if os.path.exists(LABELS_PATH) and os.path.exists(MODEL_PATH):
-        labels = json.load(open(LABELS_PATH))
-        if labels:
-            rec = cv2.face.LBPHFaceRecognizer_create()
-            rec.read(MODEL_PATH)
-            _state.update(recognizer=rec, labels=labels)
-            log.info(f"modèle chargé ({len(labels)} identité(s))")
+    _emb.clear()
+    for d in glob.glob(os.path.join(FACES_DIR, "*")):
+        if os.path.isdir(d):
+            u = os.path.basename(d)
+            arrs = [np.load(f) for f in sorted(glob.glob(os.path.join(d, "*.npy")))]
+            if arrs:
+                _emb[u] = arrs
+    log.info(f"empreintes chargées : {len(_emb)} identité(s)")
 
 
 @app.on_event("startup")
 def _startup():
+    _init_models()
     try:
         _load()
     except Exception as e:  # pragma: no cover
-        log.error(f"chargement modèle impossible : {e}")
+        log.error(f"chargement empreintes impossible : {e}")
 
 
 # ----------------------------- endpoints ------------------------------------
 @app.get("/health")
 def health():
-    return {"status": "ok", "users": len(_state["labels"]), "threshold": THRESHOLD}
-
-def _count(username):
-    return len(glob.glob(os.path.join(FACES_DIR, username, "*.png")))
+    return {"status": "ok", "users": len(_emb), "cosine": COSINE,
+            "models_ok": _models["err"] is None, "error": _models["err"]}
 
 @app.get("/users")
 def users():
-    return [{"username": u, "samples": _count(u)} for u in sorted(_state["labels"])]
+    return [{"username": u, "samples": len(_emb[u])} for u in sorted(_emb)]
 
 @app.post("/enroll")
 def enroll(body: EnrollIn):
@@ -136,38 +127,35 @@ def enroll(body: EnrollIn):
         raise HTTPException(400, "identifiant vide")
     d = os.path.join(FACES_DIR, u)
     os.makedirs(d, exist_ok=True)
-    accepted = 0
+    added = 0
     with _lock:
-        base = _count(u)
+        base = len(glob.glob(os.path.join(d, "*.npy")))
         for b64 in body.images:
-            crop = _crop(b64)
-            if crop is None:
+            feat = _feature_b64(b64)
+            if feat is None:
                 continue
-            cv2.imwrite(os.path.join(d, f"{base + accepted:03d}.png"), crop)
-            accepted += 1
-        total = _retrain() if accepted else _count(u)
-    if accepted == 0:
+            np.save(os.path.join(d, f"{base + added:03d}.npy"), feat)
+            _emb.setdefault(u, []).append(feat)
+            added += 1
+    if added == 0:
         raise HTTPException(422, "aucun visage détecté sur les photos fournies")
-    log.info("enrôlement", extra={"extra_fields": {"user": u, "ajoutées": accepted}})
-    return {"username": u, "added": accepted, "samples": _count(u),
-            "ready": _count(u) >= MIN_SAMPLES, "total_samples": total}
+    n = len(_emb.get(u, []))
+    log.info("enrôlement", extra={"extra_fields": {"user": u, "ajoutées": added, "total": n}})
+    return {"username": u, "added": added, "samples": n, "ready": n >= MIN_SAMPLES}
 
 @app.post("/verify")
 def verify(body: VerifyIn):
     u = body.username.strip()
-    rec = _state["recognizer"]
-    if rec is None or u not in _state["labels"]:
-        return {"recognized": False, "reason": "identité inconnue", "distance": None, "match": None}
-    crop = _crop(body.image)
-    if crop is None:
-        return {"recognized": False, "reason": "aucun visage détecté", "distance": None, "match": None}
-    label, dist = rec.predict(crop)
-    inv = {i: name for name, i in _state["labels"].items()}
-    match = inv.get(label)
-    recognized = (match == u) and (dist <= THRESHOLD)
-    log.info("vérification", extra={"extra_fields": {"user": u, "match": match, "dist": round(float(dist), 1), "ok": recognized}})
-    return {"recognized": recognized, "reason": "ok" if recognized else "visage non concordant",
-            "distance": round(float(dist), 1), "match": match}
+    if u not in _emb:
+        return {"recognized": False, "reason": "identité inconnue", "score": None}
+    feat = _feature_b64(body.image)
+    if feat is None:
+        return {"recognized": False, "reason": "aucun visage détecté", "score": None}
+    best = max(_cos(feat, e) for e in _emb[u])
+    ok = best >= COSINE
+    log.info("vérification", extra={"extra_fields": {"user": u, "score": round(best, 3), "ok": ok}})
+    return {"recognized": ok, "reason": "ok" if ok else "visage non concordant",
+            "score": round(best, 3), "threshold": COSINE}
 
 @app.delete("/users/{username}")
 def delete_user(username: str):
@@ -178,6 +166,6 @@ def delete_user(username: str):
         for f in glob.glob(os.path.join(d, "*")):
             os.remove(f)
         os.rmdir(d)
-        _retrain()
+        _emb.pop(username, None)
     log.info("habilitation révoquée", extra={"extra_fields": {"user": username}})
     return {"deleted": username}

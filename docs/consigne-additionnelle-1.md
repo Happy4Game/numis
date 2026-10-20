@@ -27,7 +27,7 @@ par un objet connecté **ESP8266** (LED bicolore rouge/vert) relié au point d'a
 | Exigence | Où | Détail |
 |---|---|---|
 | Caméra **sur le PC Hôte** | `frontend` (navigateur) | `getUserMedia` accède à la webcam du PC Hôte ; l'image est envoyée au back-end. |
-| IA **légère** de reconnaissance de visage | `services/face-auth` | OpenCV **LBPH** + détecteur Haar (pas de dlib/torch) ; modèle persisté sur volume. |
+| IA **légère** de reconnaissance de visage | `services/face-auth` | OpenCV **YuNet** (détection) + **SFace** (empreinte 128-D, embeddings) — bien plus fiable que LBPH, inclus dans OpenCV, sans dlib/torch ; empreintes persistées. |
 | Confirme l'identifiant par le visage | `auth` `POST /identify` | appelle `face-auth /verify(username, image)`. |
 | Puis mot de passe | `auth` `POST /backoffice/login` | exige un `face_token` court (étape visage réussie) + mot de passe. |
 | Non reconnu → identifiant vidé, caméra off | `BackOffice.jsx` | retour à l'étape identifiant, `stopCam()`. |

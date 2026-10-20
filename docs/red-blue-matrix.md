@@ -16,7 +16,7 @@
 | 7 | Falsification JWT | Compromission (intégrité) | 401 répétés (logs auth/API) | **validation de signature** HS256 | rejet 401 |
 | 8 | Élévation de privilèges | Compromission (accès) | 401 sur `/admin/*` (logs) | **endpoint admin protégé** par jeton | rejet 401 |
 | 9 | Attaque via le dashboard (:3001) | Compromission (contournement) | logs WAF + remédiation | **proxy paiement routé par le WAF** + action de remédiation **protégée par jeton** | 403 (pas de bypass) / 401 |
-| 10 | Usurpation de visage (photo) au back-office | Compromission (accès) | logs `auth` (échecs identification) | reconnaissance faciale (LBPH) + **verrouillage 5 min** ; *limite : pas de liveness* | identifiant vidé + blocage ; **liveness à prévoir** |
+| 10 | Usurpation de visage (photo) au back-office | Compromission (accès) | logs `auth` (échecs identification) | reconnaissance faciale (SFace) + **verrouillage 5 min** ; *limite : pas de liveness* | identifiant vidé + blocage ; **liveness à prévoir** |
 
 ## Lecture
 
