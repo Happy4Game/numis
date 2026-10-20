@@ -4,7 +4,7 @@ import { apiTry, authHeader } from '../lib/api'
 /* Back-office protégé par authentification forte (consigne additionnelle 1) :
    identifiant -> reconnaissance faciale (webcam PC Hôte) -> mot de passe,
    + gestion des comptes & habilitations. */
-export function BackOffice({ open, onClose }) {
+export function BackOffice({ open, onClose, onAuth, onLogout }) {
   const [view, setView] = useState('login')     // login | enrollFace | manage | newAccount
   const [step, setStep] = useState('user')       // login : user | face | password
   const [username, setUsername] = useState('')
@@ -45,16 +45,14 @@ export function BackOffice({ open, onClose }) {
     const r = await apiTry('/api/auth/backoffice/status')
     if (r.ok) setStatus(r.data)
   }
-  useEffect(() => { if (open) fetchStatus(); if (!open) stopCam(); return () => stopCam() }, [open])
+  useEffect(() => { if (open) { fetchStatus(); if (token) loadAccounts() } ; if (!open) stopCam(); return () => stopCam() }, [open])
 
   const reset = () => {
     setView('login'); setStep('user'); setUsername(''); setPassword(''); setFaceToken('')
     setToken(''); setMsg(null); setAccounts([]); setShots([]); setNu({ username: '', password: '' })
   }
-  const close = () => {
-    if (token) apiTry('/api/auth/led/off', { method: 'POST', headers: authHeader(token) })
-    stopCam(); reset(); onClose()
-  }
+  const close = () => { stopCam(); if (token && view !== 'manage') setView('manage'); setMsg(null); onClose() }
+  const logout = () => { if (token) apiTry('/api/auth/led/off', { method: 'POST', headers: authHeader(token) }); stopCam(); reset(); onLogout && onLogout() }
 
   // ---------- connexion ----------
   const goFace = () => {
@@ -79,7 +77,7 @@ export function BackOffice({ open, onClose }) {
       body: JSON.stringify({ username: username.trim(), password, face_token: faceToken }),
     })
     setBusy(false)
-    if (r.ok && r.data?.access_token) { setToken(r.data.access_token); setMsg(null); setView('manage'); loadAccounts(r.data.access_token) }
+    if (r.ok && r.data?.access_token) { setToken(r.data.access_token); setMsg(null); setView('manage'); loadAccounts(r.data.access_token); onAuth && onAuth(username.trim()) }
     else { setStep('user'); setPassword(''); setFaceToken(''); setMsg({ kind: 'err', text: r.data?.detail || 'Échec — reprise de l’identification.' }) }
   }
 
@@ -224,7 +222,7 @@ export function BackOffice({ open, onClose }) {
                 ))}
               </ul>
             )}
-            <button className="w-full text-[12px] text-muted hover:text-text py-1 border-t border-line/50 pt-3" onClick={close}>Se déconnecter</button>
+            <button className="w-full text-[12px] text-alert/90 hover:text-alert py-1 border-t border-line/50 pt-3" onClick={logout}>Se déconnecter</button>
           </div>)}
 
           {/* ---------- NOUVEAU COMPTE ---------- */}

@@ -28,6 +28,7 @@ export default function App() {
   const guideOpenRef = useRef(false); guideOpenRef.current = guideOpen
   const [boOpen, setBoOpen] = useState(false)
   const boOpenRef = useRef(false); boOpenRef.current = boOpen
+  const [boUser, setBoUser] = useState(null)
   const prevAnom = useRef(false)
 
   const SLIDES = [
@@ -115,8 +116,8 @@ export default function App() {
               {anomaly ? 'Incident en cours' : 'Système sain'}
             </div>
             <button onClick={() => setBoOpen(true)} title="Back-office sécurisé"
-              className="btn-flat flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] bg-raised/70 border border-line text-muted hover:text-text hover:border-accent">
-              <span>🔐</span><span className="hidden sm:inline">Back-office</span>
+              className={`btn-flat flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] border ${boUser ? 'bg-money/15 border-money/40 text-money' : 'bg-raised/70 border-line text-muted hover:text-text hover:border-accent'}`}>
+              <span>{boUser ? '🔓' : '🔐'}</span><span className="hidden sm:inline">{boUser ? `Admin · ${boUser}` : 'Back-office'}</span>
             </button>
             <button onClick={() => setGuideOpen(true)} title="Comprendre le système"
               className="btn-flat flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] bg-raised/70 border border-line text-muted hover:text-text hover:border-accent">
@@ -186,7 +187,7 @@ export default function App() {
       </nav>
 
       <Guide open={guideOpen} onClose={() => setGuideOpen(false)} sec={guideSec} setSec={setGuideSec} />
-      <BackOffice open={boOpen} onClose={() => setBoOpen(false)} />
+      <BackOffice open={boOpen} onClose={() => setBoOpen(false)} onAuth={setBoUser} onLogout={() => setBoUser(null)} />
 
       <Burst at={burst} />
 
