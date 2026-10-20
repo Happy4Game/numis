@@ -27,7 +27,7 @@ par un objet connecté **ESP8266** (LED bicolore rouge/vert) relié au point d'a
 | Exigence | Où | Détail |
 |---|---|---|
 | Caméra **sur le PC Hôte** | `frontend` (navigateur) | `getUserMedia` accède à la webcam du PC Hôte ; l'image est envoyée au back-end. |
-| IA **légère** de reconnaissance de visage | `services/face-auth` | OpenCV **YuNet** (détection) + **SFace** (empreinte 128-D, embeddings) — bien plus fiable que LBPH, inclus dans OpenCV, sans dlib/torch ; empreintes persistées. |
+| IA **légère** de reconnaissance de visage | `services/face-auth` | **face_recognition** (détecteur HOG + réseau ResNet dlib -> empreinte 128-D). Modèles livrés par pip (aucun téléchargement externe) ; empreintes persistées. |
 | Confirme l'identifiant par le visage | `auth` `POST /identify` | appelle `face-auth /verify(username, image)`. |
 | Puis mot de passe | `auth` `POST /backoffice/login` | exige un `face_token` court (étape visage réussie) + mot de passe. |
 | Non reconnu → identifiant vidé, caméra off | `BackOffice.jsx` | retour à l'étape identifiant, `stopCam()`. |
@@ -51,7 +51,7 @@ par un objet connecté **ESP8266** (LED bicolore rouge/vert) relié au point d'a
   session back-office.
 
 ## 5. Limites assumées (à dire au jury)
-- **La reconnaissance par empreinte (SFace) n'a pas de détection de vivacité** : une **photo** du visage pourrait tromper la
+- **La reconnaissance par empreinte (dlib) n'a pas de détection de vivacité** : une **photo** du visage pourrait tromper la
   reconnaissance (attaque par présentation). Parade industrielle : *liveness* (clignement,
   mouvement, profondeur) — hors périmètre d'un prototype court. Voir matrice Red/Blue, ligne 10.
 - Reconnaissance sensible à l'éclairage et au cadrage (enrôler 3–6 photos variées améliore).

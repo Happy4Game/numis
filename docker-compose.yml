@@ -92,7 +92,7 @@ services:
     container_name: rsa-face-auth
     environment:
       MODEL_DIR: /model
-      FACE_COSINE: ${FACE_COSINE:-0.30}
+      FACE_TOLERANCE: ${FACE_TOLERANCE:-0.6}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - face-model:/model          # habilitations (visages) + modèle persistés

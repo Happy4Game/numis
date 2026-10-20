@@ -208,7 +208,7 @@ export function BackOffice({ open, onClose, onAuth, onLogout }) {
                 {stat('Visages enrôlés', overview.enrolled_faces, 'habilitations', '#5B8DEF')}
                 {stat('Verrouillages', overview.locked, 'actifs', overview.locked ? '#F26D6D' : '#F2B64B')}
               </div>
-              <div className="text-[11.5px] text-muted">Authentification forte active : accès au back-office confirmé par reconnaissance faciale (SFace) + mot de passe.</div>
+              <div className="text-[11.5px] text-muted">Authentification forte active : accès au back-office confirmé par reconnaissance faciale (dlib) + mot de passe.</div>
             </>) : <div className="text-[12px] text-muted">Chargement…</div>}
           </div>)}
 
