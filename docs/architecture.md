@@ -109,3 +109,19 @@ qu'au frontend).
   correction d'une compromission (scénario SQLi → bloqué en amont par le WAF, pas d'auto-remédiation).
 - Fenêtre de normalité courte (warmup) : un trafic de référence atypique fausserait le modèle.
 - Prototype 4 jours : pas de HA, pas de persistance longue des métriques.
+
+## 8. Authentification forte du back-office (consigne additionnelle 1)
+
+Le back-office exige désormais une **authentification à deux facteurs** : identifiant →
+**reconnaissance faciale** (webcam du PC Hôte) → mot de passe. Un **objet connecté ESP8266**
+(LED bicolore) signale l'état de chaque tentative.
+
+```
+navigateur (webcam PC Hôte) ──image──► auth ──/verify──► face-auth (OpenCV LBPH, interne)
+                                         │
+                                         └──état──► ESP8266 (LED, sur le PA RESILIENCE-G<n>)
+```
+
+- `face-auth` : service **interne** (jamais exposé), appelé uniquement par `auth`.
+- `ESP8266` : sur le réseau du groupe ; `auth` lui pousse l'état en HTTP (`ESP_URL`), best-effort.
+- Détail complet et traçabilité : [`consigne-additionnelle-1.md`](consigne-additionnelle-1.md).

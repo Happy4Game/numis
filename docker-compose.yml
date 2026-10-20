@@ -34,6 +34,7 @@ volumes:
   loki-data:
   ollama-data:
   ml-model:
+  face-model:
 
 services:
   # ---------------------------------------------------------------
@@ -66,8 +67,11 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       DB_DSN: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FACE_AUTH_URL: http://face-auth:8000      # reconnaissance faciale (interne)
+      ESP_URL: ${ESP_URL:-}                     # objet connecté ESP8266 (LED). Vide = pas de LED
     depends_on:
       db: {condition: service_healthy}
+      face-auth: {condition: service_started}
     networks: [rsa-net]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
@@ -75,6 +79,26 @@ services:
       timeout: 4s
       retries: 10
       start_period: 5s
+    <<: *json-logging
+
+  # Reconnaissance faciale (IA légère, OpenCV LBPH) — confirme le visage à la connexion
+  # back-office (consigne additionnelle 1). INTERNE : appelé uniquement par `auth`.
+  face-auth:
+    build: ./services/face-auth
+    container_name: rsa-face-auth
+    environment:
+      MODEL_DIR: /model
+      FACE_THRESHOLD: ${FACE_THRESHOLD:-70}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - face-model:/model          # habilitations (visages) + modèle persistés
+    networks: [rsa-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 4s
+      retries: 10
+      start_period: 10s
     <<: *json-logging
 
   payment-api:

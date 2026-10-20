@@ -27,3 +27,6 @@ services/ml-detector/model.pkl
 .DS_Store
 .idea/
 .vscode/
+
+# PlatformIO (ESP8266)
+.pio/

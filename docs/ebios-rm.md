@@ -16,6 +16,7 @@
   | ER1 | V2 | Indisponibilité du paiement | 4 |
   | ER2 | V3 | Altération d'un solde | 4 |
   | ER3 | V1 | Transaction refusée à tort | 3 |
+  | ER4 | V3/Accès | Accès illégitime au back-office (intrusion physique/vol d'identifiants) | 4 |
 
 ## Atelier 2 — Sources de risque (SR) / Objectifs visés (OV)
 | SR | Motivation | OV |
@@ -37,6 +38,8 @@
 | SO1 | détection ML + remédiation autonome + rate-limit WAF | ✅ démontré |
 | SO2 | WAF CRS + requêtes paramétrées + alerte SOC | ✅ démontré |
 | ER2 | moindre privilège remédiation, secrets SOPS | ✅ |
+| ER4 | **MFA** : visage (face-auth) + mot de passe, verrouillage, habilitations | ✅ consigne add. 1 |
+| ER4 (résiduel) | pas de détection de vivacité (anti-photo) | accepté (proto) — liveness à prévoir |
 | Résiduel | pas de HA, warmup court | accepté (prototype 4 j) |
 
 ## Objectifs de sécurité → RTO/RPO

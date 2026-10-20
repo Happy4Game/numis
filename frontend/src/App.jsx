@@ -9,6 +9,7 @@ import { Containers } from './components/Containers'
 import { ServicesMenu } from './components/ServicesMenu'
 import { Synthese } from './components/Synthese'
 import { Guide } from './components/Guide'
+import { BackOffice } from './components/BackOffice'
 import { Burst } from './components/Burst'
 import { GUIDE_ICON } from './components/icons'
 
@@ -25,6 +26,8 @@ export default function App() {
   const flash = useRef(false)
   const pointer = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
   const guideOpenRef = useRef(false); guideOpenRef.current = guideOpen
+  const [boOpen, setBoOpen] = useState(false)
+  const boOpenRef = useRef(false); boOpenRef.current = boOpen
   const prevAnom = useRef(false)
 
   const SLIDES = [
@@ -40,6 +43,7 @@ export default function App() {
       const tag = (e.target.tagName || '').toLowerCase()
       if (tag === 'input' || tag === 'select' || tag === 'textarea') return
       if (guideOpenRef.current) { if (e.key === 'Escape') setGuideOpen(false); return }
+      if (boOpenRef.current) return
       if (e.key === 'ArrowRight') setSlide((s) => Math.min(SLIDES.length - 1, s + 1))
       if (e.key === 'ArrowLeft') setSlide((s) => Math.max(0, s - 1))
     }
@@ -110,6 +114,10 @@ export default function App() {
               <span className={`w-2 h-2 rounded-full ${anomaly ? 'bg-alert' : 'bg-money'}`} />
               {anomaly ? 'Incident en cours' : 'Système sain'}
             </div>
+            <button onClick={() => setBoOpen(true)} title="Back-office sécurisé"
+              className="btn-flat flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] bg-raised/70 border border-line text-muted hover:text-text hover:border-accent">
+              <span>🔐</span><span className="hidden sm:inline">Back-office</span>
+            </button>
             <button onClick={() => setGuideOpen(true)} title="Comprendre le système"
               className="btn-flat flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] bg-raised/70 border border-line text-muted hover:text-text hover:border-accent">
               {GUIDE_ICON}<span className="hidden sm:inline">Comprendre</span>
@@ -178,6 +186,7 @@ export default function App() {
       </nav>
 
       <Guide open={guideOpen} onClose={() => setGuideOpen(false)} sec={guideSec} setSec={setGuideSec} />
+      <BackOffice open={boOpen} onClose={() => setBoOpen(false)} />
 
       <Burst at={burst} />
 
