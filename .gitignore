@@ -18,7 +18,7 @@ frontend/dist/
 # Données locales / logs
 infra/waf/logs/*.log
 *.log
-data/
+/data/            # (racine only — ne pas ignorer frontend/src/data)
 
 # ML artefacts volumineux (régénérables)
 services/ml-detector/model.pkl

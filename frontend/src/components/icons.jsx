@@ -1,0 +1,9 @@
+export const I = {
+  card:  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="2.5" y="5" width="19" height="14" rx="2.5" stroke="#7FB0FF" strokeWidth="1.6"/><path d="M2.5 9.5h19" stroke="#7FB0FF" strokeWidth="1.6"/></svg>,
+  brain: <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8A3 3 0 0 0 7 18a2.5 2.5 0 0 0 5 .3V5.5A2.5 2.5 0 0 0 9 4Z" stroke="#A78BFA" strokeWidth="1.5"/><path d="M15 4a3 3 0 0 1 3 3 3 3 0 0 1 1 5.8A3 3 0 0 1 17 18a2.5 2.5 0 0 1-5 .3" stroke="#7FB0FF" strokeWidth="1.5"/></svg>,
+  wrench:<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M14.5 6.5a3.8 3.8 0 0 1-4.9 4.6L5 15.7 8.3 19l4.6-4.6a3.8 3.8 0 0 0 4.6-4.9l-2.3 2.3-2.1-.6-.6-2.1 2-1.6Z" stroke="#5B8DEF" strokeWidth="1.5" strokeLinejoin="round"/></svg>,
+  grid:  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="#F2B64B" strokeWidth="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" stroke="#F2B64B" strokeWidth="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" stroke="#F2B64B" strokeWidth="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5" stroke="#F2B64B" strokeWidth="1.5"/></svg>,
+  eye:   <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" stroke="#35D6A4" strokeWidth="1.5"/><circle cx="12" cy="12" r="2.6" stroke="#35D6A4" strokeWidth="1.5"/></svg>,
+}
+
+export const GUIDE_ICON = (<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5V5.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M4 5.5A2.5 2.5 0 0 0 6.5 8H20" stroke="currentColor" strokeWidth="1.6"/></svg>)
