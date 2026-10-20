@@ -134,7 +134,7 @@ export function BackOffice({ open, onClose }) {
   const btn = 'w-full rounded-lg bg-gradient-to-r from-accent to-sky2 hover:brightness-110 disabled:opacity-50 text-ink font-semibold px-3 py-2.5 text-[14px]'
   const Cam = () => (
     <div className="rounded-xl overflow-hidden border border-line bg-ink mb-3 relative">
-      <video ref={videoRef} playsInline muted className="w-full h-[220px] object-cover bg-black" />
+      <video ref={videoRef} autoPlay playsInline muted className="w-full h-[220px] object-cover bg-black" />
       <canvas ref={canvasRef} className="hidden" />
       <div className="absolute left-2 top-2 text-[10px] uppercase tracking-wider text-sky2 bg-ink/70 px-2 py-0.5 rounded">caméra PC Hôte</div>
     </div>
@@ -152,7 +152,7 @@ export function BackOffice({ open, onClose }) {
           <button onClick={close} className="btn-flat w-8 h-8 grid place-items-center rounded-lg text-muted hover:text-text hover:bg-raised/70">✕</button>
         </header>
         <div className="p-5">
-          <Msg />
+          {Msg()}
 
           {mode === 'login' && step === 'user' && (
             <div className="space-y-3">
@@ -166,7 +166,7 @@ export function BackOffice({ open, onClose }) {
 
           {mode === 'login' && step === 'face' && (
             <div className="space-y-3">
-              <Cam />
+              {Cam()}
               <div className="text-[12px] text-muted">Identifiant : <span className="text-text font-mono">{username}</span></div>
               <button className={btn} disabled={busy} onClick={doIdentify}>{busy ? 'Vérification…' : 'Confirmer mon visage'}</button>
               <button className="w-full text-[12px] text-muted hover:text-text py-1" onClick={() => { stopCam(); setStep('user') }}>Annuler</button>
@@ -185,7 +185,7 @@ export function BackOffice({ open, onClose }) {
 
           {mode === 'enroll' && (
             <div className="space-y-3">
-              <Cam />
+              {Cam()}
               <label className="block"><span className="text-[11.5px] uppercase tracking-wider text-faint">Identifiant à habiliter</span>
                 <input className={field + ' mt-1'} value={enrollName} onChange={(e) => setEnrollName(e.target.value)} /></label>
               <div className="flex items-center gap-2">
