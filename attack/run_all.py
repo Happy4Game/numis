@@ -32,6 +32,15 @@ def main():
             results.append({"name": name, "category": "?", "defense": "?",
                             "blocked": False, "detail": f"erreur : {e}"})
 
+    # Attaque via le dashboard (:3001) — proxy du front, cible distincte du WAF
+    front = args.target.replace(":8080", ":3001")
+    try:
+        import front_proxy
+        results.append(front_proxy.run(front))
+    except Exception as e:
+        results.append({"name": "Attaque via le dashboard (:3001)", "category": "Compromission",
+                        "defense": "proxy front", "blocked": False, "detail": f"erreur : {e}"})
+
     # tableau
     w = max(len(r["name"]) for r in results)
     print(f"{'Attaque'.ljust(w)} │ {'Catégorie'.ljust(16)} │ Défense tenue ?")

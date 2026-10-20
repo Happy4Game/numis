@@ -15,6 +15,7 @@
 | 6 | Brute-force auth | Compromission | **alerte `BruteForceSuspectee`** (pic 401) | **verrouillage** temporaire (auth) | 429 après N échecs |
 | 7 | Falsification JWT | Compromission (intégrité) | 401 répétés (logs auth/API) | **validation de signature** HS256 | rejet 401 |
 | 8 | Élévation de privilèges | Compromission (accès) | 401 sur `/admin/*` (logs) | **endpoint admin protégé** par jeton | rejet 401 |
+| 9 | Attaque via le dashboard (:3001) | Compromission (contournement) | logs WAF + remédiation | **proxy paiement routé par le WAF** + action de remédiation **protégée par jeton** | 403 (pas de bypass) / 401 |
 
 ## Lecture
 

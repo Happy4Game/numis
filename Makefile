@@ -5,10 +5,11 @@ SHELL := /bin/bash
 
 # Cible des attaques (local par défaut ; démo réseau : make attack-dos TARGET=http://192.168.137.1:8080)
 TARGET ?= http://localhost:8080
+FRONT ?= http://localhost:3001
 DURATION ?= 60
 CONC ?= 50
 
-.PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-ddos attack-sqli attack-all chaos-kill chaos-stop chaos-kill-db traffic train retrain clean
+.PHONY: help init up down logs ps build pull-model seed smoke attack-dos attack-ddos attack-sqli attack-front attack-all chaos-kill chaos-stop chaos-kill-db traffic train retrain clean
 
 help:            ## Affiche cette aide
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}'
@@ -45,6 +46,9 @@ attack-dos:      ## (depuis PC Attaquant) lance le scénario DoS contrôlé
 
 attack-sqli:     ## (depuis PC Attaquant) lance la tentative d'injection SQL
 	python3 attack/scenarios/sqli_probe.py --target $(TARGET)
+
+attack-front:    ## (PC Attaquant) attaque via le DASHBOARD :3001 (bypass WAF + privilèges)
+	python3 attack/scenarios/front_proxy.py --target $(FRONT)
 
 attack-all:      ## Catalogue complet Red/Blue (hors DoS) + synthèse
 	python3 attack/run_all.py --target $(TARGET)
